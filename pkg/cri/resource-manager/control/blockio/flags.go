@@ -19,8 +19,41 @@ import (
 )
 
 // options captures our configurable parameters.
+//
+// This is the user-friendly configuration interface, example:
+// resource-manager:
+//   blockio:
+//     Classes:
+//       BestEffort:
+//         # Default configuration for all virtio and scsi block devices.
+//         - Devices:
+//             - /dev/vd*
+//             - /dev/sd*
+//           ThrottleReadBps: 50M   # max read bytes per second
+//           ThrottleWriteBps: 10M  # max write bytes per second
+//           ThrottleReadIOPS: 10k  # max read io operations per second
+//           ThrottleWriteIOPS: 5k  # max write io operations per second
+//           Weight: 50             # io-scheduler (cfq/bfq) weight.
+//                                  # Devices are defined for this weight, so
+//                                  # this is written to cgroups(.bfq).weight_device
+//         # Configuration for SSD devices (overrides /dev/sd* for SSD disks)
+//         - Devices:
+//             - /dev/disk/by-id/*SSD*
+//           ThrottleReadBps: 100M
+//           ThrottleWriteBps: 40M
+//           # Leaving Throttle*IOPS out means no throttling on those.
+//           Weight: 50
+//       Guaranteed:
+//         # When Devices are not mentioned in the list item, only Weight,
+//         # Weight is written to cgroups(.bfq).weight.
+//         - Weight: 400
+//       # Default for any other BlockIO/QOS class (e.g. Burstable)
+//       Default:
+//         - Weight: 100
+
+// options captures our configurable parameters.
 type options struct {
-	// Class is a assigned to actual RDT class map.
+	// Classes assigned to actual blockio classes, for example Guaranteed -> NoLimits.
 	Classes map[string]string `json:",omitempty"`
 }
 
@@ -29,7 +62,9 @@ var opt = defaultOptions().(*options)
 
 // defaultOptions returns a new options instance, all initialized to defaults.
 func defaultOptions() interface{} {
-	return &options{Classes: make(map[string]string)}
+	return &options{
+		Classes: make(map[string]string),
+	}
 }
 
 // Register us for configuration handling.
