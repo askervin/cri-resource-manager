@@ -174,10 +174,9 @@ func (u *updater) setAdjustment(adjust *resmgrAdjustment) (map[string]string, er
 	specs := map[string]*resmgr.AdjustmentSpec{}
 	for name, p := range *adjust {
 		specs[name] = &resmgr.AdjustmentSpec{
-			Scope:        p.Spec.NodeScope(nodeName),
-			Resources:    p.Spec.Resources,
-			Classes:      p.Spec.Classes,
-			ToptierLimit: p.Spec.ToptierLimit,
+			Scope:     p.Spec.NodeScope(nodeName),
+			Resources: p.Spec.Resources,
+			Classes:   p.Spec.Classes,
 		}
 	}
 	encoded, err := json.Marshal(specs)

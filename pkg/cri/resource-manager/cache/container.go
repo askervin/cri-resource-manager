@@ -456,7 +456,11 @@ func (c *container) GetDeviceByContainer(path string) *Device {
 
 func (c *container) GetResourceRequirements() v1.ResourceRequirements {
 	if adjust, _ := c.getEffectiveAdjustment(); adjust != nil {
-		if resources, ok := adjust.GetResourceRequirements(); ok {
+		if adjustmentResources, ok := adjust.GetResourceRequirements(); ok {
+			resources := v1.ResourceRequirements{
+				Requests: adjustmentResources.Requests,
+				Limits:   adjustmentResources.Limits,
+			}
 			return resources
 		}
 	}
@@ -786,8 +790,10 @@ func (c *container) SetToptierLimit(limit int64) {
 
 func (c *container) GetToptierLimit() int64 {
 	if adjust, _ := c.getEffectiveAdjustment(); adjust != nil {
-		if adjust.ToptierLimit != nil {
-			return adjust.ToptierLimit.Value()
+		if adjustmentResources, ok := adjust.GetResourceRequirements(); ok {
+			if adjustmentResources.ToptierLimit != nil {
+				return adjustmentResources.ToptierLimit.Value()
+			}
 		}
 	}
 	return c.ToptierLimit

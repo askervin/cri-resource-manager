@@ -45,10 +45,9 @@ type Adjustment struct {
 
 // AdjustmentSpec specifies the scope for an external adjustment.
 type AdjustmentSpec struct {
-	Scope        []AdjustmentScope            `json:"scope"`
-	Resources    *corev1.ResourceRequirements `json:"resources"`
-	Classes      *Classes                     `json:"classes"`
-	ToptierLimit *resapi.Quantity             `json:"toptierLimit"`
+	Scope     []AdjustmentScope    `json:"scope"`
+	Resources *AdjustmentResources `json:"resources"`
+	Classes   *Classes             `json:"classes"`
 }
 
 // AdjustmentStatus represents the status of applying an adjustment.
@@ -65,6 +64,13 @@ type AdjustmentNodeStatus struct {
 type AdjustmentScope struct {
 	Nodes      []string             `json:"nodes"`
 	Containers []*resmgr.Expression `json:"containers"`
+}
+
+// AdjustmentResources extends the usual limits and requests (corev1.ResourceRequirements) with ToptierLimit.
+type AdjustmentResources struct {
+	Limits       corev1.ResourceList `json:"limits,omitempty"`
+	Requests     corev1.ResourceList `json:"requests,omitempty"`
+	ToptierLimit *resapi.Quantity    `json:"toptierLimit,omitempty"`
 }
 
 // Classes defines RDT and BlockIO class assignments.

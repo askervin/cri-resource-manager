@@ -62,6 +62,8 @@ spec:
                           type: string
                         memory:
                           type: string
+                    toptierLimit:
+                      type: string
                 classes:
                   type: object
                   properties:
@@ -69,8 +71,6 @@ spec:
                       type: string
                     blockio:
                       type: string
-                toptierLimit:
-                  type: string
             status:
               type: object
               properties:

@@ -45,11 +45,11 @@ func (spec *AdjustmentSpec) NodeScope(node string) []AdjustmentScope {
 }
 
 // GetResourceRequirements returns the k8s resource requirements for this adjustment.
-func (spec *AdjustmentSpec) GetResourceRequirements() (corev1.ResourceRequirements, bool) {
+func (spec *AdjustmentSpec) GetResourceRequirements() (AdjustmentResources, bool) {
 	if spec.Resources != nil {
 		return *spec.Resources, true
 	}
-	return corev1.ResourceRequirements{}, false
+	return AdjustmentResources{}, false
 }
 
 // GetRDTClass returns the RDT class for this adjustment.
@@ -103,12 +103,6 @@ func (spec *AdjustmentSpec) Compare(other *AdjustmentSpec) bool {
 		return false
 	case !spec.Classes.Compare(other.Classes):
 		return false
-	case spec.ToptierLimit == nil && other.ToptierLimit != nil:
-		return false
-	case spec.ToptierLimit != nil && other.ToptierLimit == nil:
-		return false
-	case spec.ToptierLimit != nil && spec.ToptierLimit.Value() != other.ToptierLimit.Value():
-		return false
 	}
 	return true
 }
@@ -118,10 +112,6 @@ func (spec *AdjustmentSpec) Verify() error {
 	if err := spec.verifyResources(); err != nil {
 		return err
 	}
-	if err := spec.verifyToptierLimit(); err != nil {
-		return err
-	}
-
 	return nil
 }
 
@@ -139,6 +129,12 @@ func (spec *AdjustmentSpec) compareResources(other *AdjustmentSpec) bool {
 	case spec.Resources != nil && other.Resources == nil:
 		return false
 	case spec.Resources == nil && other.Resources != nil:
+		return false
+	case spec.Resources.ToptierLimit == nil && other.Resources.ToptierLimit != nil:
+		return false
+	case spec.Resources.ToptierLimit != nil && other.Resources.ToptierLimit == nil:
+		return false
+	case spec.Resources.ToptierLimit != nil && spec.Resources.ToptierLimit.Value() != other.Resources.ToptierLimit.Value():
 		return false
 	}
 
@@ -219,18 +215,11 @@ func (spec *AdjustmentSpec) verifyResources() error {
 		}
 	}
 
-	return nil
-}
-
-// verifyToptierLimit verifies the top tier memory limit settings of this spec.
-func (spec *AdjustmentSpec) verifyToptierLimit() error {
-	if spec.ToptierLimit == nil {
-		return nil
-	}
-
-	l := spec.ToptierLimit.Value()
-	if l < 0 {
-		return apiError("invalid ToptierLimit %v", l)
+	if r.ToptierLimit != nil {
+		l := r.ToptierLimit.Value()
+		if l < 0 {
+			return apiError("invalid resource toptierlimit %v < 0", l)
+		}
 	}
 
 	return nil
