@@ -332,9 +332,10 @@ func (p *policy) applyGrant(grant Grant) error {
 		cpus = shared.String()
 		kind = "shared"
 	} else {
-		cpus = exclusive.Union(shared).String()
+		cpus = exclusive.String()
 		kind = "exclusive"
 		if portion > 0 {
+			cpus = exclusive.Union(shared).String()
 			kind += "+shared"
 		}
 	}
