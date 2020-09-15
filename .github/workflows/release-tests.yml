@@ -1,11 +1,8 @@
 name: Release Tests
 on:
-  pull_request:
-    branches:
-      - 'releases/**'
   push:
     branches:
-      - 'releases/**'
+      - 'delme*'
     tags:
       - v*
 
@@ -64,4 +61,4 @@ jobs:
 #      uses: mxschmitt/action-tmate@v3
 
     - name: Run release tests
-      run: make release-tests
+      run: USE_NET_BRIDGES=1 make release-tests
