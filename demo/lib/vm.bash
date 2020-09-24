@@ -13,6 +13,10 @@ VM_GOVM_COMPOSE_TEMPLATE="vms:
       - KVM_CPU_OPTS=\$(echo "\${KVM_CPU_OPTS}")
       - EXTRA_QEMU_OPTS=\$(echo "\${EXTRA_QEMU_OPTS}")
       - USE_NET_BRIDGES=${USE_NET_BRIDGES-0}
+      - CLOUD=Y
+    user-data: |
+      #!/bin/bash
+      $VM_GOVM_USER_DATA
 "
 
 vm-check-env() {
