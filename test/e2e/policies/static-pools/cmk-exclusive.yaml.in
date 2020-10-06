@@ -1,0 +1,32 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${NAME}
+  labels:
+    app: ${NAME}
+spec:
+  terminationGracePeriodSeconds: 1
+  tolerations:
+    - key: 'cmk'
+      operator: 'Equal'
+      value: 'true'
+      effect: 'NoSchedule'
+  containers:
+    - name: ${NAME}c0
+      image: busybox
+      env:
+        - name: STP_POOL
+          value: 'exclusive'
+        - name: STP_SOCKET_ID
+          value: '${SOCKET-0}'
+      command:
+        - 'sh'
+        - '-c'
+        - 'while :; do echo ${NAME}c0 CMK_CPUS_ASSIGNED=\"\$CMK_CPUS_ASSIGNED\"; sleep 1; done'
+      resources:
+        requests:
+          cpu: ${CPU}
+          cmk.intel.com/exclusive-cores: '${EXCLCORES}'
+        limits:
+          cpu: ${CPU}
+          cmk.intel.com/exclusive-cores: '${EXCLCORES}'

@@ -1,0 +1,1 @@
+-static-pools-conf-file /etc/cmk/pools.conf -static-pools-create-cmk-node-label -static-pools-create-cmk-node-taint

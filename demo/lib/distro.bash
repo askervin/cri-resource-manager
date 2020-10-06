@@ -84,8 +84,16 @@ ubuntu-20_04-image-url() {
     echo "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
 }
 
+ubuntu-20_10-image-url() {
+    echo "https://cloud-images.ubuntu.com/groovy/current/groovy-server-cloudimg-amd64.img"
+}
+
 debian-10-image-url() {
     echo "https://cloud.debian.org/images/cloud/buster/20200803-347/debian-10-generic-amd64-20200803-347.qcow2"
+}
+
+debian-sid-image-url() {
+    echo "https://cloud.debian.org/images/cloud/sid/daily/20201013-422/debian-sid-generic-amd64-daily-20201013-422.qcow2"
 }
 
 ubuntu-ssh-user() {
@@ -102,6 +110,8 @@ debian-pkg-type() {
 
 debian-install-repo-key() {
     local key
+    # apt-key needs gnupg2, that might not be available by default
+    vm-command "command -v gpg >/dev/null 2>&1" || debian-install-pkg gnupg2
     for key in $@; do
         vm-command "curl -s $key | apt-key add -" ||
             command-error "failed to install repo key $key"
@@ -140,7 +150,6 @@ debian-install-golang() {
 debian-10-install-containerd() {
     vm-command-q "[ -f /usr/bin/containerd ]" || {
         debian-refresh-pkg-db
-        debian-install-pkg gnupg2
         debian-install-repo-key https://download.docker.com/linux/debian/gpg
         debian-install-repo "deb https://download.docker.com/linux/debian buster stable"
         debian-refresh-pkg-db
@@ -153,6 +162,9 @@ debian-install-containerd() {
     vm-command-q "[ -f /usr/bin/containerd ]" || {
         debian-refresh-pkg-db
         debian-install-pkg containerd
+        # The default Debian containerd expects CNI binaries in /usr/lib/cni,
+        # but kubernetes-cni.deb (debian-install-k8s) installs to /opt/cni/bin.
+        vm-command "sed -e 's|bin_dir = \"/usr/lib/cni\"|bin_dir = \"/opt/cni/bin\"|g' -i /etc/containerd/config.toml"
         generic-setup-containerd
     }
 }
@@ -329,6 +341,13 @@ default-setup-proxies() {
     if [ -z "$http_proxy$https_proxy$ftp_proxy$no_proxy" ]; then
         return 0
     fi
+    if vm-command-q "grep -q \"http_proxy=$http_proxy\" /etc/profile.d/proxy.sh && \
+                     grep -q \"https_proxy=$https_proxy\" /etc/profile.d/proxy.sh && \
+                     grep -q \"ftp_proxy=$ftp_proxy\" /etc/profile.d/proxy.sh && \
+                     grep -q \"no_proxy=$no_proxy\" /etc/profile.d/proxy.sh" 2>/dev/null; then
+        # No changes in proxy configuration
+        return 0
+    fi
 
     local file scope="" append="--append"
     local hn=$(vm-command-q hostname)
@@ -338,11 +357,11 @@ default-setup-proxies() {
 ${scope}http_proxy=$http_proxy
 ${scope}https_proxy=$https_proxy
 ${scope}ftp_proxy=$ftp_proxy
-${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn
+${scope}no_proxy=$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn,.svc
 ${scope}HTTP_PROXY=$http_proxy
 ${scope}HTTPS_PROXY=$https_proxy
 ${scope}FTP_PROXY=$ftp_proxy
-${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn
+${scope}NO_PROXY=$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn,.svc
 EOF
       vm-pipe-to-file $append $file
       scope="export "
@@ -374,7 +393,7 @@ generic-setup-containerd() {
 [Service]
 Environment=HTTP_PROXY="$http_proxy"
 Environment=HTTPS_PROXY="$https_proxy"
-Environment=NO_PROXY="$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn"
+Environment=NO_PROXY="$no_proxy,$VM_IP,10.96.0.0/12,10.217.0.0/16,$hn,.svc"
 EOF
             vm-pipe-to-file /etc/systemd/system/containerd.service.d/proxy.conf
     fi
