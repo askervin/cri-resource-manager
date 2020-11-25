@@ -470,7 +470,7 @@ func (cs *supply) Allocate(r Request) (Grant, error) {
 				cs.node.Name(), cr.full, cs.isolated, err)
 		}
 
-	case cr.full > 0 && cs.AllocatableSharedCPU() > 1000*cr.full:
+	case cr.full > 0 && cs.AllocatableSharedCPU() >= 1000*cr.full:
 		exclusive, err = cs.takeCPUs(&cs.sharable, nil, cr.full)
 		if err != nil {
 			return nil, policyError("internal error: "+
