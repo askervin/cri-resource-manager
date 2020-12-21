@@ -186,7 +186,7 @@ for POLICY_DIR in "$TESTS_ROOT_DIR"/*; do
                 export distro
                 cri=${cri:=containerd}
                 export cri
-                vm="$(basename "$TOPOLOGY_DIR")-${distro}-${cri}"
+                vm=${vm:="$(basename "$TOPOLOGY_DIR")-${distro}-${cri}"}
                 export vm
                 export-and-source-dir "$TOPOLOGY_DIR"
                 for TEST_DIR in "$TOPOLOGY_DIR"/*; do

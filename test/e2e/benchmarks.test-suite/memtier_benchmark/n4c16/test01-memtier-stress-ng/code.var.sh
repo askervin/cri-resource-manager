@@ -1,10 +1,31 @@
-# Redis parameters
-REDIS_PASS=abc123xyz
+# Benchmark parameters
+# --------------------
+#
+# Parameters to configure benchmark and background QoS class:
+# CPU resource request and limit
+# - benchmark server (BMS)
+# - benchmark client (BMC)
+# - background (BG)
+# Setting CPU_(BMS|BMC|BG) to 0 omits the resource: section completely.
+CPU_BMS=${CPU_BMS:-2}
+CPU_LIM_BMS=${CPU_LIM_BMS:-2}
+CPU_BMC=${CPU_BMC:-4}
+CPU_LIM_BMC=${CPU_LIM_BMC:-4}
+CPU_BG=${CPU_BG:-50m}
+CPU_LIM_BG=${CPU_LIM_BG:-16}
 
+# Parameters to choose benchmark client affinity/anti-affinity for the
+# server pod. AFFINITY="affinity" or "anti-affinity"
+AFFINITY=${AFFINITY:-affinity}
+
+###
 # Background load parameters
 STRESS_NG_CPUS=16 # workers per container
 STRESS_NG_CONTS=8 # number of containers per pod
 STRESS_NG_PODS=2 # number of pods
+
+# Redis parameters
+REDIS_PASS=abc123xyz
 
 # BG_* are background loads
 # CPU turbo licence level 2 (causes big drop on GHz) cannot be reached with stress-ng, but could be implemented with
@@ -37,7 +58,7 @@ vm-command "kubectl delete jobs --all --now; kubectl delete deployment redis; ku
 
 # Setup Redis
 wait="" create redis-secret
-CPU=4 MEM=32G CPULIM=8 MEMLIM=64G NAME=redis wait="Available" create redis
+CPU="$CPU_BMS" MEM=32G CPULIM="$CPU_LIM_BMS" MEMLIM=32G NAME=redis wait="Available" create redis
 NAME=redis-service wait="" create redis-service
 
 for bg_cmd in "${!BG_@}"; do
@@ -49,34 +70,25 @@ for bg_cmd in "${!BG_@}"; do
 
     # Start background noise
     if [[ "${!bg_cmd}" == "stress-ng "* ]]; then
-        n="$STRESS_NG_PODS" ARGS="${!bg_cmd#stress-ng }" CONTCOUNT="$STRESS_NG_CONTS" CPU=50m MEM=50M CPULIM=$STRESS_NG_CPUS MEMLIM=1G wait_t=240s create stress-ng
+        n="$STRESS_NG_PODS" ARGS="${!bg_cmd#stress-ng }" CONTCOUNT="$STRESS_NG_CONTS" CPU=50m MEM=200M CPULIM=$STRESS_NG_CPUS MEMLIM=200M wait_t=10m create stress-ng
         # Stabilize
         ( vm-run-until --timeout 60 "sh -c 'uptime; exit 1'" ) || echo "expected timeout"
     fi
 
     for bm_cmd in "${!BM_@}"; do
-        for CPU in 4; do
-            # Run benchmark
-            if [[ "${!bm_cmd}" == "memtier-benchmark "* ]]; then
-                AFFINITY=affinity CPU="$CPU" MEM="16G" CPULIM="$CPU" MEMLIM="24G" NAME=memtier-benchmark ARGS="${!bm_cmd#memtier-benchmark }" wait="Complete" wait_t="10m" create memtier-benchmark
-                memtier_benchmark_pod="$(kubectl get pods | awk '/memtier-benchmark-/{print $1}')"
-                kubectl logs "$memtier_benchmark_pod" | grep -A7 'ALL STATS' | tee "$benchmark_output_dir/$bm_cmd-affinity-cpu-$CPU.txt"
-                kubectl delete jobs --all --now
-
-                # AFFINITY=anti-affinity CPU="$CPU" MEM="16G" NAME=memtier-benchmark ARGS="${!bm_cmd#memtier-benchmark }" wait="Complete" wait_t="10m" create memtier-benchmark
-                # memtier_benchmark_pod="$(kubectl get pods | awk '/memtier-benchmark-/{print $1}')"
-                # kubectl logs "$memtier_benchmark_pod" | grep -A7 'ALL STATS' | tee "$benchmark_output_dir/$bm_cmd-antiaffinity-cpu-$CPU.txt"
-                # kubectl delete jobs --all --now
-
-            elif [[ "${!bm_cmd}" == "stress-ng "* ]]; then
-                CPU="$CPU" MEM="200M" CPULIM="$STRESS_NG_CPUS" MEM="400M" NAME=stress-ng-benchmark ARGS="${!bm_cmd#stress-ng }" wait="Complete" wait_t="10m" create stress-ng-benchmark
-                stress_ng_benchmark_pod="$(kubectl get pods | awk '/stress-ng-benchmark-/{print $1}')"
-                kubectl logs "$stress_ng_benchmark_pod" | tee "$benchmark_output_dir/$bm_cmd-cpu-$CPU.txt"
-                kubectl delete jobs --all --now
-            fi
-        done
+        # Run benchmark
+        if [[ "${!bm_cmd}" == "memtier-benchmark "* ]]; then
+            AFFINITY="$AFFINITY" CPU="$CPU_BMC" MEM="16G" CPULIM="$CPU_LIM_BMC" MEMLIM="16G" NAME=memtier-benchmark ARGS="${!bm_cmd#memtier-benchmark }" wait="Complete" wait_t="30m" create memtier-benchmark
+            memtier_benchmark_pod="$(kubectl get pods | awk '/memtier-benchmark-/{print $1}')"
+            kubectl logs "$memtier_benchmark_pod" | grep -A7 'ALL STATS' | tee "$benchmark_output_dir/$bm_cmd-$AFFINITY-cpu-$CPU_BMC.txt"
+            kubectl delete jobs --all --now
+        elif [[ "${!bm_cmd}" == "stress-ng "* ]]; then
+            CPU="$CPU_BMC" MEM="200M" CPULIM="$CPU_LIM_BMC" MEM="200M" NAME=stress-ng-benchmark ARGS="${!bm_cmd#stress-ng }" wait="Complete" wait_t="30m" create stress-ng-benchmark
+            stress_ng_benchmark_pod="$(kubectl get pods | awk '/stress-ng-benchmark-/{print $1}')"
+            kubectl logs "$stress_ng_benchmark_pod" | tee "$benchmark_output_dir/$bm_cmd-cpu-$CPU.txt"
+            kubectl delete jobs --all --now
+        fi
     done
-
     # Stop background noise
     ( kubectl delete pods -l e2erole=bgload --now )
 done

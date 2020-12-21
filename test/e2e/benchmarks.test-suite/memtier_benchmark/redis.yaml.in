@@ -30,6 +30,7 @@ spec:
                 secretKeyRef:
                   name: redis
                   key: REDIS_PASS
+          $(if [ "$CPU" != "0" ]; then echo "
           resources:
             requests:
               cpu: ${CPU}
@@ -37,3 +38,4 @@ spec:
             limits:
               cpu: ${CPULIM}
               memory: '${MEMLIM}'
+          "; fi)
