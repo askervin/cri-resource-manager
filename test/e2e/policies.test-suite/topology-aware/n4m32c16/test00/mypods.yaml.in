@@ -1,0 +1,38 @@
+$(for podnum in $(seq ${PODCOUNT}); do echo "
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mypod-s${podnum}
+  annotations:
+    topologyhints.cri-resource-manager.intel.com/pod: \"false\"
+spec:
+  restartPolicy: Never
+  hostAliases:
+  - ip: \"127.0.0.1\"
+    hostnames:
+    - \"myvm\"
+  containers:
+  - name: mycont-s${podnum}
+    resources:
+      requests:
+        memory: \"${MEM}\"
+        cpu: \"${CPU}\"
+      limits:
+        memory: \"${MEMLIM}\"
+        cpu: \"${CPULIM}\"
+    imagePullPolicy: IfNotPresent
+    image: busybox
+    args:
+    - sh
+    - -c
+    - echo s${podnum} started \$(date) > /mydir/mypod; echo pod${podnum}c0 \$(sleep inf)
+    volumeMounts:
+    - mountPath: /mydir
+      name: mydir-directory
+  volumes:
+    - name: mydir-directory
+      hostPath:
+        path: /tmp/mypod-s${podnum}/mydir
+        type: DirectoryOrCreate
+"; done )
