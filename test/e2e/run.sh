@@ -146,6 +146,14 @@ screen-install-cri-resmgr-debugging() {
     host-command "cd \"$HOST_PROJECT_DIR/..\" && rsync -av --exclude .git $(basename "$HOST_PROJECT_DIR") $VM_SSH_USER@$VM_IP:"
     vm-command "mkdir -p \"\$HOME/.config/dlv\""
     vm-command "( echo 'substitute-path:'; echo ' - {from: $HOST_PROJECT_DIR, to: /home/$VM_SSH_USER/$(basename "$HOST_PROJECT_DIR")}' ) > \"\$HOME/.config/dlv/config.yml\""
+
+}
+
+screen-install-containerd-debugging() {
+    local containerd_dir="${HOST_PROJECT_DIR}/../../containerd/containerd"
+    containerd_dir=$(realpath "$containerd_dir")
+    host-command "cd \"$containerd_dir/..\" && find $(basename "$containerd_dir") -name \"*.go\" | rsync -av --files-from=- . $VM_SSH_USER@$VM_IP:"
+    vm-command "( echo 'substitute-path:'; echo ' - {from: $containerd_dir, to: /home/$VM_SSH_USER/$(basename "$containerd_dir")}' ) >> \"\$HOME/.config/dlv/config.yml\""
 }
 
 screen-launch-cri-resmgr() {
@@ -385,6 +393,9 @@ install() { # script API
     #                 $ binsrc=github install cri-resmgr
     #   cri-resmgr-webhook: install cri-resmgr-webhook to VM.
     #               Installs from the latest webhook Docker image on the host.
+    #   containerd: install containerd to VM.
+    #               Installing from go/src/github.com/containerd/containerd:
+    #                  containerd_binsrc=local install containerd
     #
     # Example:
     #   uninstall cri-resmgr
@@ -397,6 +408,9 @@ install() { # script API
             ;;
         "cri-resmgr-webhook")
             vm-install-cri-resmgr-webhook
+            ;;
+        "containerd")
+            vm-install-containerd
             ;;
         *)
             error "unknown target to install \"$1\""

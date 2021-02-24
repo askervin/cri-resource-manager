@@ -452,6 +452,25 @@ vm-networking() {
     distro-setup-proxies
 }
 
+vm-install-containerd() {
+    local prefix=/usr/bin
+    if [ "$containerd_binsrc" != "local" ]; then
+        error "only containerd_binsrc=local is supported. Otherwise use vm-install-cri."
+        return
+    fi
+    local bindir=$(realpath ${HOST_PROJECT_DIR}/../../containerd/containerd/bin)
+    local binfiles=(containerd containerd-shim containerd-shim-runc-v1 containerd-shim-runc-v2 ctr)
+    for binfile in "${binfiles[@]}"; do
+        [ -f "$bindir/$binfile" ] || {
+            error "install failed, $bindir/$binfile missing"
+            return
+        }
+    done
+    for binfile in "${binfiles[@]}"; do
+        vm-put-file "$bindir/$binfile" "$prefix/$binfile"
+    done
+}
+
 vm-install-cri-resmgr() {
     prefix=/usr/local
     # shellcheck disable=SC2154
