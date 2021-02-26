@@ -46,7 +46,7 @@ func (cgid *CgroupID) Find(id uint64) (string, error) {
 		return path, nil
 	}
 
-	err := filepath.Walk(cgid.root, func(path string, info os.FileInfo, err error) error {
+	err := fsi.Walk(cgid.root, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			if os.IsNotExist(err) {
 				return nil

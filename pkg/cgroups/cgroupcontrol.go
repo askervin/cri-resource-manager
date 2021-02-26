@@ -155,7 +155,7 @@ func (g Group) AddProcesses(pids ...string) error {
 // Write writes the formatted data to the groups entry.
 func (g Group) Write(entry, format string, args ...interface{}) error {
 	entryPath := path.Join(string(g), entry)
-	f, err := os.OpenFile(entryPath, os.O_WRONLY, 0644)
+	f, err := fsi.OpenFile(entryPath, os.O_WRONLY, 0644)
 	if err != nil {
 		return g.errorf("%q: failed to open: %v", entry, err)
 	}
@@ -175,7 +175,7 @@ func (g Group) readPids(entry string) ([]string, error) {
 
 	pidFile := path.Join(string(g), entry)
 
-	f, err := os.OpenFile(pidFile, os.O_RDONLY, 0644)
+	f, err := fsi.OpenFile(pidFile, os.O_RDONLY, 0644)
 	if err != nil {
 		return nil, g.errorf("failed to open %q: %v", entry, err)
 	}
@@ -196,7 +196,7 @@ func (g Group) readPids(entry string) ([]string, error) {
 func (g Group) writePids(entry string, pids ...string) error {
 	pidFile := path.Join(string(g), entry)
 
-	f, err := os.OpenFile(pidFile, os.O_WRONLY, 0644)
+	f, err := fsi.OpenFile(pidFile, os.O_WRONLY, 0644)
 	if err != nil {
 		return g.errorf("failed to write pids to %q: %v", pidFile, err)
 	}
