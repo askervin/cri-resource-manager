@@ -19,13 +19,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/intel/goresctrl/pkg/rdt"
 	pkgcfg "github.com/intel/cri-resource-manager/pkg/config"
 	"github.com/intel/cri-resource-manager/pkg/cri/client"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/control"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 	"github.com/intel/cri-resource-manager/pkg/metrics"
-	"github.com/intel/goresctrl/pkg/rdt"
 )
 
 const (

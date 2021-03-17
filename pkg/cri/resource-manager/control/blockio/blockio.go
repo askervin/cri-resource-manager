@@ -19,8 +19,9 @@ import (
 
 	"github.com/hashicorp/go-multierror"
 
-	"github.com/intel/cri-resource-manager/pkg/blockio"
-	"github.com/intel/cri-resource-manager/pkg/config"
+	"github.com/intel/goresctrl/pkg/blockio"
+
+	pkgcfg "github.com/intel/cri-resource-manager/pkg/config"
 	"github.com/intel/cri-resource-manager/pkg/cri/client"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/control"
@@ -30,6 +31,9 @@ import (
 const (
 	// BlockIOController is the name of the block I/O controller.
 	BlockIOController = cache.BlockIO
+	// ConfigModuleName is the name of the blockio module in the
+	// cri-resmgr configuration.
+	ConfigModuleName = "blockio"
 )
 
 // blockio encapsulates the runtime state of our block I/O enforcement/controller.
@@ -123,7 +127,7 @@ func (ctl *blockioctl) isImplicitlyDisabled() bool {
 	return *ctl.idle
 }
 
-// assign assigns the container to the given block I/O class.
+// assign assigns a container into its block I/O class.
 func (ctl *blockioctl) assign(c cache.Container) error {
 	class := c.GetBlockIOClass()
 	if class == "" {
@@ -134,7 +138,7 @@ func (ctl *blockioctl) assign(c cache.Container) error {
 		return nil
 	}
 
-	if err := blockio.SetContainerClass(c, class); err != nil {
+	if err := blockio.SetContainerClass(c.GetCgroupDir(), class); err != nil {
 		return blockioError("%q: failed to assign to class %q: %w", c.PrettyName(), class, err)
 	}
 
@@ -144,9 +148,9 @@ func (ctl *blockioctl) assign(c cache.Container) error {
 }
 
 // configNotify is blockio class mapping and class definition configuration callback
-func (ctl *blockioctl) configNotify(event config.Event, source config.Source) error {
-	ignoreErrors := (event == config.RevertEvent)
-	err := blockio.UpdateOciConfig(ignoreErrors)
+func (ctl *blockioctl) configNotify(event pkgcfg.Event, source pkgcfg.Source) error {
+	ignoreErrors := (event == pkgcfg.RevertEvent)
+	err := blockio.UpdateConfig(opt, ignoreErrors)
 	if err != nil {
 		return err
 	}
@@ -169,7 +173,7 @@ func (ctl *blockioctl) reconfigureRunningContainers() error {
 	for _, c := range ctl.cache.GetContainers() {
 		class := c.GetBlockIOClass()
 		log.Debug("%q: configure blockio class %q", c.PrettyName(), class)
-		err := blockio.SetContainerClass(c, class)
+		err := blockio.SetContainerClass(c.GetCgroupDir(), class)
 		if err != nil {
 			errors = multierror.Append(errors, err)
 		}
@@ -182,8 +186,17 @@ func blockioError(format string, args ...interface{}) error {
 	return fmt.Errorf("blockio: "+format, args...)
 }
 
+// defaultOptions returns a new instance of "raw" options set to their defaults
+func defaultOptions() interface{} {
+	return &blockio.Config{}
+}
+
+// Currently active set of "raw" options
+var opt = defaultOptions().(*blockio.Config)
+
 // init registers this controller and sets configuration change handling.
 func init() {
 	control.Register(BlockIOController, "Block I/O controller", getBlockIOController())
-	config.GetModule(blockio.ConfigModuleName).AddNotify(getBlockIOController().configNotify)
+	pkgcfg.Register(ConfigModuleName, "Block I/O class control", opt, defaultOptions)
+	pkgcfg.GetModule(ConfigModuleName).AddNotify(getBlockIOController().configNotify)
 }

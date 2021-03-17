@@ -24,7 +24,8 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 
-	"github.com/intel/cri-resource-manager/pkg/blockio"
+	"github.com/intel/goresctrl/pkg/blockio"
+
 	"github.com/intel/cri-resource-manager/pkg/config"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/agent"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
@@ -385,6 +386,8 @@ func (p *policy) Introspect() *introspect.State {
 	for _, rdtClass := range rdt.GetClasses() {
 		rdtClassNames = append(rdtClassNames, rdtClass.Name())
 	}
+	// TODO: get classes from local controller or make sure
+	// goresctrl gets the classes...
 	blkioClassNames := []string{}
 	for _, blkioClass := range blockio.GetClasses() {
 		blkioClassNames = append(blkioClassNames, blkioClass.Name)
