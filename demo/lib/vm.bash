@@ -43,6 +43,19 @@ vm-ssh-user() {
 }
 
 vm-check-env() {
+    # If VM IP address is already defined, govm is not needed.
+    if [ -n "$VM_IP" ]; then
+        if [ "x$(vm-command-q "whoami")" != "xroot" ]; then
+            echo "ERROR:"
+            echo "ERROR: environment check failed:"
+            echo "ERROR:   cannot connect to test node with"
+            echo "ERROR:   $SSH $VM_SSH_USER@$VM_IP"
+            echo "ERROR:"
+            return 1
+        fi
+        return 0
+    fi
+    # Check that VM created/managed with govm in this environment.
     type -p govm >& /dev/null || {
         echo "ERROR:"
         echo "ERROR: environment check failed:"
@@ -115,21 +128,37 @@ vm-check-env() {
     fi
 }
 
-vm-check-binary-cri-resmgr() {
-    # Check running cri-resmgr version, print warning if it is not
-    # the latest local build.
-    # shellcheck disable=SC2016
-    if [ -f "$BIN_DIR/cri-resmgr" ] && [ "$(vm-command-q 'md5sum < /proc/$(pidof cri-resmgr)/exe')" != "$(md5sum < "$BIN_DIR/cri-resmgr")" ]; then
+vm-check-running-binary() {
+    local bin_file="$1"
+    local bin_name
+    bin_name="$(basename "$bin_file")"
+    if [ -f "$bin_file" ] && [ "$(vm-command-q "md5sum < /proc/\$(pidof $bin_name)/exe")" != "$(md5sum < "$bin_file")" ]; then
         echo "WARNING:"
-        echo "WARNING: Running cri-resmgr binary is different from"
-        echo "WARNING: $BIN_DIR/cri-resmgr"
-        echo "WARNING: Consider restarting with \"reinstall_cri_resmgr=1\" or"
-        echo "WARNING: run.sh> uninstall cri-resmgr; install cri-resmgr; launch cri-resmgr"
+        echo "WARNING: Running $bin_name binary is different from"
+        echo "WARNING: $bin_file"
+        echo "WARNING: Consider restarting with reinstall_${bin_name//-/_}=1."
         echo "WARNING:"
         sleep "${warning_delay:-0}"
         return 1
     fi
     return 0
+}
+
+
+vm-check-source-files-changed() {
+    local bin_change
+    local src_change
+    local src_dir="$1"
+    local bin_file="$2"
+    bin_change=$(stat --format "%Z" "$bin_file")
+    src_change=$(find "$src_dir" -name '*.go' -type f -print0 | xargs -0 stat --format "%Z" | sort -n | tail -n 1)
+    if [[ "$src_change" > "$bin_change" ]]; then
+        echo "WARNING:"
+        echo "WARNING: Source files changed, outdated binaries in"
+        echo "WARNING: $(dirname "$bin_file")/"
+        echo "WARNING:"
+        sleep "${warning_delay:-0}"
+    fi
 }
 
 vm-command() { # script API
@@ -480,17 +509,6 @@ vm-install-cri-resmgr() {
         }
         vm-command "systemctl daemon-reload"
     elif [ -z "$binsrc" ] || [ "$binsrc" == "local" ]; then
-        local bin_change
-        local src_change
-        bin_change=$(stat --format "%Z" "$BIN_DIR/cri-resmgr")
-        src_change=$(find "$HOST_PROJECT_DIR" -name '*.go' -type f -print0 | xargs -0 stat --format "%Z" | sort -n | tail -n 1)
-        if [[ "$src_change" > "$bin_change" ]]; then
-            echo "WARNING:"
-            echo "WARNING: Source files changed - installing possibly outdated binaries from"
-            echo "WARNING: $BIN_DIR/"
-            echo "WARNING:"
-            sleep "${warning_delay:-0}"
-        fi
         vm-put-file "$BIN_DIR/cri-resmgr" "$prefix/bin/cri-resmgr"
         vm-put-file "$BIN_DIR/cri-resmgr-agent" "$prefix/bin/cri-resmgr-agent"
     else
@@ -527,7 +545,17 @@ vm-cri-import-image() {
     esac
 }
 
-vm-put-docker-image() {
+vm-put-docker-image() { # script API
+    # Usage: vm-put-docker-image IMAGE
+    #
+    # Exports IMAGE from docker images on the host, and
+    # imports it in the "k8s.io" namespace (visible
+    # for kubernetes containers) on the vm.
+    #
+    # Works with containerd only.
+    #
+    # Examples:
+    #   vm-put-docker-image busybox:latest
     local image_name="$1"
     local image_file_on_vm="images/${image_name//:/__}"
     vm-command-q "mkdir -p $(dirname "$image_file_on_vm")"
@@ -607,9 +635,43 @@ vm-install-golang() {
     distro-install-golang
 }
 
+vm-install-runc() {
+    local host_runc="$runc_src/runc"
+    local vm_runc="/usr/sbin/runc"
+    if [ -n "$runc_src" ]; then
+        # Check if runc is already installed on VM.
+        # If it is, replace existing binary with local build."
+        vm-command 'command -v runc'
+        if [ -n "$COMMAND_OUTPUT" ] && [ "x$COMMAND_STATUS" == "x0" ]; then
+            vm_runc="$COMMAND_OUTPUT"
+        fi
+        vm-put-file "$host_runc" "$vm_runc"
+    else
+        distro-install-pkg runc
+    fi
+}
+
 vm-install-cri() {
     distro-install-"$VM_CRI"
     distro-config-"$VM_CRI"
+    if [ "$VM_CRI" == "containerd" ]; then
+        if [ -n "$containerd_src" ]; then
+            vm-command "systemctl stop containerd"
+            for f in ctr containerd containerd-stress containerd-shim containerd-shim-runc-v1 containerd-shim-runc-v2; do
+                vm-put-file "$containerd_src/bin/$f" "/usr/bin/$f"
+            done
+            vm-command "systemctl start containerd"
+        fi
+    elif [ "$VM_CRI" == "crio" ]; then
+        if [ -n "$crio_src" ]; then
+            vm-command "systemctl stop crio"
+            for f in crio crio-status pinns; do
+                vm-put-file "$crio_src/bin/$f" "/usr/bin/$f"
+            done
+            vm-command "systemctl enable crio"
+            vm-command "systemctl start crio"
+        fi
+    fi
 }
 
 vm-install-containernetworking() {
@@ -656,6 +718,31 @@ EOF'
 EOF'
 }
 
+vm-install-dlv() {
+    vm-install-golang
+    vm-install-pkg git
+    vm-install-pkg rsync
+    vm-command "go get github.com/go-delve/delve/cmd/dlv" || {
+        command-error "installing delve failed"
+    }
+    echo '[ "`id -u`" -eq 0 ] && PATH=$PATH:/root/go/bin' | vm-pipe-to-file /etc/profile.d/root-path-go.sh
+    vm-command "mkdir -p \"\$HOME/.config/dlv/config.yml.d\""
+    vm-command "echo 'substitute-path:' > \"\$HOME/.config/dlv/config.yml.d/00-substitute-path\""
+}
+
+vm-dlv-add-src() {
+    local host_src_dir="$1"
+    [ -d "$host_src_dir" ] || error "vm-dlv-add-src: invalid source directory \"$host_src_dir\", existing go project directory expected"
+    vm-command "mkdir -p /home/$VM_SSH_USER/src; chmod a+rwX /home/$VM_SSH_USER/src"
+    host-command "cd \"$host_src_dir/..\" && rsync -avz --include \"*/\" --include \"**/*.go\" --exclude \"*\" \"$(basename "$host_src_dir")\" $VM_SSH_USER@$VM_IP:src/"
+    vm-command "echo ' - {from: \"$host_src_dir\", to: \"/home/$VM_SSH_USER/src/$(basename "$host_src_dir")\"}' > \"\$HOME/.config/dlv/config.yml.d/01-$(basename "$host_src_dir")\""
+    vm-dlv-update-config
+}
+
+vm-dlv-update-config() {
+    vm-command "cat \$HOME/.config/dlv/config.yml.d/* > \$HOME/.config/dlv/config.yml"
+}
+
 vm-install-k8s() {
     distro-install-k8s
     distro-restart-$VM_CRI
@@ -671,7 +758,7 @@ vm-create-singlenode-cluster() {
 }
 
 vm-create-cluster() {
-    vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket /var/run/cri-resmgr/cri-resmgr.sock"
+    vm-command "kubeadm init --pod-network-cidr=$CNI_SUBNET --cri-socket ${k8scri_sock}"
     if ! grep -q "initialized successfully" <<< "$COMMAND_OUTPUT"; then
         command-error "kubeadm init failed"
     fi

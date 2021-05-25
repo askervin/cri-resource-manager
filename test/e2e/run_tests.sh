@@ -46,7 +46,11 @@ $(< "$var_filepath")"
             else
                 echo "exporting $var_name - overriding from $var_filepath"
             fi
-            export "$var_name"="$(< "$var_filepath")"
+            if [[ "$var_file_name" == *.var.in.* ]]; then
+                export "$var_name"="$(eval "echo -e \"$(<"${var_filepath}")\"")"
+            else
+                export "$var_name"="$(< "$var_filepath")"
+            fi
         fi
     done
 }
@@ -166,7 +170,7 @@ for POLICY_DIR in "$TESTS_ROOT_DIR"/*; do
     (
         for CFG_FILE in "$POLICY_DIR"/*.cfg; do
             if ! [ -f "$CFG_FILE" ]; then
-                error "cannot find cri-resmgr configuration $POLICY_DIR/*.cfg"
+                continue
             fi
             export cri_resmgr_cfg=$CFG_FILE
         done
@@ -184,9 +188,30 @@ for POLICY_DIR in "$TESTS_ROOT_DIR"/*; do
             (
                 distro=${distro:=$DEFAULT_DISTRO}
                 export distro
-                cri=${cri:=containerd}
-                export cri
-                vm="$(basename "$TOPOLOGY_DIR")-${distro}-${cri}"
+                # Create name for the vm.
+                # Needs topology, distro and container runtime stack.
+                k8scri=${k8scri:="cri-resmgr|containerd"}
+                case "${k8scri}" in
+                    "cri-resmgr|containerd")
+                        criname=crirm-containerd
+                        ;;
+                    "cri-resmgr|crio")
+                        criname=crirm-crio
+                        ;;
+                    "containerd&cri-resmgr")
+                        criname=nrirm-containerd
+                        ;;
+                    "containerd")
+                        criname=containerd
+                        ;;
+                    "crio")
+                        criname=crio
+                        ;;
+                    *)
+                        error "unsupported k8scri: \"${k8scri}\""
+                        ;;
+                esac
+                vm="$(basename "$TOPOLOGY_DIR")-${distro}-${criname}"
                 export vm
                 export-and-source-dir "$TOPOLOGY_DIR"
                 for TEST_DIR in "$TOPOLOGY_DIR"/*; do

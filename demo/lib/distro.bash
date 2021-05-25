@@ -187,7 +187,13 @@ debian-refresh-pkg-db() {
 }
 
 debian-install-pkg() {
-    vm-command "apt-get install -y $*" ||
+    # dpkg configure may ask "The default action is to keep your
+    # current version", for instance when a test has added
+    # /etc/containerd/config.toml and then apt-get installs
+    # containerd. 'yes ""' will continue with the default answer (N:
+    # keep existing) in this case. Without 'yes' installation fails
+    # fails.
+    vm-command "yes \"\" | apt-get install -y $*" ||
         command-error "failed to install $*"
 }
 
@@ -197,7 +203,7 @@ debian-remove-pkg() {
 }
 
 debian-install-golang() {
-    debian-install-pkg golang
+    debian-install-pkg golang git
 }
 
 debian-10-install-containerd-pre() {
@@ -208,6 +214,12 @@ debian-10-install-containerd-pre() {
 
 debian-sid-install-containerd-post() {
     vm-command "sed -e 's|bin_dir = \"/usr/lib/cni\"|bin_dir = \"/opt/cni/bin\"|g' -i /etc/containerd/config.toml"
+}
+
+debian-install-crio-pre() {
+    debian-refresh-pkg-db
+    debian-install-pkg libgpgme11 conmon runc containernetworking-plugins conntrack || true
+    # vm-command "mkdir -p /opt/cni/bin; ln -s /usr/lib/cni/* /opt/cni/bin"
 }
 
 debian-install-k8s() {
@@ -288,7 +300,7 @@ centos-7-k8s-cni() {
 }
 
 centos-install-golang() {
-    distro-install-pkg wget tar gzip
+    distro-install-pkg wget tar gzip git-core
     from-tarball-install-golang
 }
 
@@ -317,8 +329,13 @@ fedora-remove-pkg() {
 }
 
 fedora-install-golang() {
-    fedora-install-pkg wget tar gzip
+    fedora-install-pkg wget tar gzip git
     from-tarball-install-golang
+}
+
+fedora-install-crio-pre() {
+    distro-install-pkg runc conmon
+    vm-command "ln -sf /usr/lib64/libdevmapper.so.1.02 /usr/lib64/libdevmapper.so.1.02.1" || true
 }
 
 fedora-install-containerd-pre() {
@@ -366,18 +383,19 @@ echo 'Defaults !requiretty' > /etc/sudoers.d/10-norequiretty
 setenforce 0
 sed -E -i 's/^SELINUX=.*$/SELINUX=permissive/' /etc/selinux/config
 
-echo PATH="\$PATH:/usr/local/bin:/usr/local/sbin" > /etc/profile.d/usr-local-path.sh
-
+echo PATH='\$PATH:/usr/local/bin:/usr/local/sbin' > /etc/profile.d/usr-local-path.sh
+EOF
+    if [[ "${cgroups:-}" != "v2" ]]; then
+        cat <<EOF
 if grep -q NAME=Fedora /etc/os-release; then
     if ! grep -q systemd.unified_cgroup_hierarchy=0 /proc/cmdline; then
         sudo grubby --update-kernel=ALL --args="systemd.unified_cgroup_hierarchy=0"
         shutdown -r now
     fi
 fi
-
 EOF
+    fi
 }
-
 
 ###########################################################################
 
@@ -411,6 +429,7 @@ opensuse-refresh-pkg-db() {
 }
 
 opensuse-install-pkg() {
+    opensuse-wait-for-zypper
     vm-command "$ZYPPER install $*" ||
         command-error "failed to install $*"
 }
@@ -421,19 +440,30 @@ opensuse-remove-pkg() {
 }
 
 opensuse-install-golang() {
-    opensuse-install-pkg wget tar gzip
+    opensuse-install-pkg wget tar gzip git-core
     from-tarball-install-golang
 }
 
 opensuse-wait-for-zypper() {
-    vm-command 'cnt=0; while ps axuw | grep zypper | grep -qv grep; do if [ $cnt -lt 5 ]; then echo "Waiting for zypper to exit..."; sleep 1; let cnt=$cnt+1; else echo "Killing running zypper..."; killall zypper; sleep 1; fi; done'
+    vm-run-until --timeout 5 '( ! pidof zypper >/dev/null ) || ( killall zypper; sleep 1; exit 1 )' ||
+        error "Failed to stop zypper running in the background"
+}
+
+opensuse-install-crio-pre() {
+    distro-install-pkg runc conmon
+    vm-command "ln -sf /usr/lib64/libdevmapper.so.1.02 /usr/lib64/libdevmapper.so.1.02.1" || true
 }
 
 opensuse-install-containerd() {
-    opensuse-install-repo https://download.opensuse.org/repositories/Virtualization:containers/openSUSE_Leap_15.2/Virtualization:containers.repo
-    opensuse-install-pkg containerd
+    vm-command "zypper ls"
+    if ! grep -q Virtualization_containers <<< "$COMMAND_OUTPUT"; then
+        opensuse-install-repo https://download.opensuse.org/repositories/Virtualization:containers/openSUSE_Leap_15.2/Virtualization:containers.repo
+        opensuse-refresh-pkg-db
+    fi
+    opensuse-install-pkg --from Virtualization_containers containerd containerd-ctr
+    vm-command "ln -sf /usr/sbin/containerd-ctr /usr/sbin/ctr"
 
-cat <<EOF |
+    cat <<EOF |
 [Unit]
 Description=containerd container runtime
 Documentation=https://containerd.io
@@ -465,10 +495,39 @@ EOF
 }
 
 opensuse-install-k8s() {
-    opensuse-install-pkg "kubernetes1.18-kubeadm kubernetes1.18-kubelet kubernetes1.18-client"
-    # remove original options to use crio as runtime
-    vm-command "mv /etc/sysconfig/kubelet /etc/sysconfig/kubelet.orig && cat /etc/sysconfig/kubelet.orig | sed -E 's:--container-runtime=remote::g;s:--container-runtime-endpoint=[^ ]* ::g' > /etc/sysconfig/kubelet" ||
-        command-error "failed to update kubelet configuration"
+    vm-command "( lsmod | grep -q br_netfilter ) || { echo br_netfilter > /etc/modules-load.d/50-br_netfilter.conf; modprobe br_netfilter; }"
+    vm-command "echo 1 > /proc/sys/net/ipv4/ip_forward"
+    vm-command "zypper ls"
+    if ! grep -q snappy <<< "$COMMAND_OUTPUT"; then
+        opensuse-install-repo "http://download.opensuse.org/repositories/system:/snappy/openSUSE_Leap_15.2 snappy"
+        opensuse-refresh-pkg-db
+        opensuse-install-pkg "snapd apparmor-profiles socat ebtables cri-tools conntrackd"
+    fi
+    vm-install-containernetworking
+    vm-command "systemctl enable --now snapd"
+    vm-command "snap wait system seed.loaded"
+    for kubepart in kubelet kubectl kubeadm; do
+        vm-command "snap install $kubepart --classic"
+    done
+    # Manage kubelet with systemd rather than snap
+    vm-command "snap stop kubelet"
+cat <<EOF |
+[Unit]
+Description=kubelet: The Kubernetes Node Agent
+Documentation=https://kubernetes.io/docs/
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+ExecStart=/snap/bin/kubelet --bootstrap-kubeconfig=/etc/kubernetes/bootstrap-kubelet.conf --kubeconfig=/etc/kubernetes/kubelet.conf --config=/var/lib/kubelet/config.yaml --container-runtime=remote --container-runtime-endpoint=${k8scri_sock} --pod-infra-container-image=k8s.gcr.io/pause:3.4.1
+Restart=always
+StartLimitInterval=0
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    vm-pipe-to-file /etc/systemd/system/kubelet.service
     vm-command "systemctl enable --now kubelet" ||
         command-error "failed to enable kubelet"
 }
@@ -559,7 +618,7 @@ EOF
       append=""
     done
     # Setup proxies for systemd services that might be installed later
-    for file in /etc/systemd/system/{containerd,docker}.service.d/proxy.conf; do
+    for file in /etc/systemd/system/{containerd,docker,crio}.service.d/proxy.conf; do
         cat <<EOF |
 [Service]
 Environment=HTTP_PROXY=$http_proxy
@@ -607,6 +666,52 @@ default-restart-containerd() {
         command-error "failed to restart containerd systemd service"
 }
 
+default-install-crio() {
+    [ -n "$crio_src" ] || error "crio install error: crio_src is not set"
+    [ -x "$crio_src/bin/crio" ] || error "crio install error: file not found $crio_src/bin/crio"
+    for f in crio crio-status pinns; do
+        vm-put-file "$crio_src/bin/$f" "/usr/bin/$f"
+    done
+    cat <<EOF |
+[Unit]
+Description=cri-o container runtime
+Documentation=https://cri-o.io
+After=network.target
+
+[Service]
+ExecStart=/usr/bin/crio
+
+Delegate=yes
+KillMode=process
+Restart=always
+LimitNPROC=infinity
+LimitCORE=infinity
+LimitNOFILE=1048576
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    vm-pipe-to-file /etc/systemd/system/crio.service
+    vm-command "mkdir -p /etc/systemd/system/crio.service.d"
+    vm-command "(echo \"[Service]\"; echo \"Environment=PATH=/sbin:/usr/sbin:$PATH:/usr/libexec/podman\") > /etc/systemd/system/crio.service.d/path.conf; systemctl daemon-reload"
+}
+
+default-config-crio() {
+    vm-command "mkdir -p /etc/containers"
+    echo '{"default": [{"type":"insecureAcceptAnything"}]}' | vm-pipe-to-file /etc/containers/policy.json
+    cat <<EOF |
+[registries.search]
+registries = ['docker.io']
+EOF
+    vm-pipe-to-file /etc/containers/registries.conf
+}
+
+default-restart-crio() {
+    vm-command "systemctl daemon-reload && systemctl restart crio" ||
+        command-error "failed to restart crio systemd service"
+}
+
 ###########################################################################
 
 #
@@ -616,9 +721,9 @@ default-restart-containerd() {
 from-tarball-install-golang() {
     vm-command-q "go version | grep -q go$GOLANG_VERSION" || {
         vm-command "wget --progress=dot:giga $GOLANG_URL -O go.tgz" && \
-            vm-command "tar -C /usr/local -xvzf go.tgz && rm go.tgz" && \
-            vm-command "echo \"PATH=/usr/local/go/bin:\$PATH\" > /etc/profile.d/go.sh" && \
-            vm-command "* installed \$(go version)"
+            vm-command "tar -C /usr/local -xvzf go.tgz >/dev/null && rm go.tgz" && \
+            vm-command "echo 'PATH=/usr/local/go/bin:\$PATH' > /etc/profile.d/go.sh" && \
+            vm-command "echo \* installed \$(go version)"
     }
 }
 
