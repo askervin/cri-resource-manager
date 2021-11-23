@@ -1,0 +1,245 @@
+# This model simulates how different FillOrders fill pod pools
+
+language python {
+    import random
+
+    # max_pods is the maximum number of pods in a pool
+    max_pods = 3
+
+    # max_cpu is the maximum number of CPU available in a pool
+    max_cpu = 4000
+
+    # Vars instance is a namespace for
+    class Vars:
+        def __repr__(self):
+            return "{" + ",".join("%s:%s" % (a, getattr(self, a)) for a in sorted(self.__dict__.keys()) if not a.startswith("_")) + "}\n"
+
+    class Pools(dict):
+        def __repr__(self):
+            out = []
+            for pool_name in sorted(self):
+                if len(out) > 0:
+                    out.append("; ")
+                out.append(str(pool_name) + ":")
+                pods = []
+                for v in self[pool_name]:
+                    pods.append(str(v.pod))
+                out.append("".join(sorted(pods)))
+            return "".join(out)
+
+    # vars parses VAR=VALUE's from string s and returns them in Vars.
+    # Example:
+    #   v = vars("foo first=42 second=bar")
+    #   v.first == 42     # is True
+    #   v.second == 'bar' # is True
+    def vars(s):
+        v = Vars()
+        for word in s.split():
+            keyvalue = word.split("=")
+            if len(keyvalue) == 2:
+                try:
+                    setattr(v, keyvalue[0], int(keyvalue[1]))
+                except:
+                    setattr(v, keyvalue[0], keyvalue[1])
+        return v
+
+    # cpu_used returns total cpu used by all pods in pools
+    def cpu_used(pools):
+        total_cpu = 0
+        for pool in pools:
+            total_cpu += sum([v.cpu for v in pools[pool]])
+        return total_cpu
+
+    def add_to(target_set, item, dry_run):
+        if not dry_run:
+            target_set.add(item)
+        return True # always return "added", but not really add if dry_run
+
+    # Fill* implement available fill order algorithms.
+    # A pod whose information is in variable v is added
+    # to a pool in pools.
+
+    def FillFirstFree(v, pools, dry_run=False):
+        for pool in sorted(pools):
+            if len(pools[pool]) < max_pods:
+                return add_to(pools[pool], v, dry_run)
+                break
+
+    def FillBalanced(v, pools, dry_run=False):
+        pods_pool = []
+        for pool in sorted(pools):
+            if len(pools[pool]) < max_pods:
+                pods_pool.append((len(pools[pool]), pool))
+        pods_pool.sort()
+        if len(pods_pool) > 0:
+            return add_to(pools[pods_pool[0][1]], v, dry_run)
+
+    def FillPacked(v, pools, dry_run=False):
+        pods_pool = []
+        for pool in sorted(pools):
+            if len(pools[pool]) < max_pods:
+                pods_pool.append((max_pods - len(pools[pool]), pool))
+        pods_pool.sort()
+        if len(pods_pool) > 0:
+            return add_to(pools[pods_pool[0][1]], v, dry_run)
+
+    # FillMinCPU assigns pod v to a pool with smallest CPU usage
+    def FillMinCPU(v, pools, dry_run=False):
+        cpu_pool = []
+        for pool in pools:
+            used_cpu = sum([pod.cpu for pod in pools[pool]])
+            cpu_pool.append((used_cpu, pool))
+        cpu_pool.sort()
+        # if the pool with lowest cpu usage has enough free cpu
+        # for the pod, add the pod to the pool.
+        if v.cpu <= max_cpu - cpu_pool[0][0]:
+            return add_to(pools[cpu_pool[0][1]], v, dry_run)
+
+    # FillMaxCPU assigns pod v to a pool with maximum CPU usage
+    def FillMaxCPU(v, pools, dry_run=False):
+        cpu_pool = []
+        for pool in pools:
+            used_cpu = sum([pod.cpu for pod in pools[pool]])
+            if v.cpu <= max_cpu - used_cpu:
+                cpu_pool.append((used_cpu, pool))
+        cpu_pool.sort(reverse=True)
+        if len(cpu_pool) > 0:
+            return add_to(pools[cpu_pool[0][1]], v, dry_run)
+
+    # FillMaxPods assigns pod v to a pool so that after the assignment
+    # the number of largest seen pods that can be assigned is maximal.
+    def FillMaxPods(v, pools, dry_run=False):
+        if v.cpu not in FillMaxPods.pod_sizes:
+            FillMaxPods.pod_sizes.add(v.cpu)
+        # cost_pool is a list of pairs (cost, pool), or in more detail
+        # ([largest_pod_delta, ..., smallest_pod_delta], poolname)
+        # where *_pod_delta is the difference in the number of pods
+        # allocatable on the node, if pod v is allocated to poolname.
+        cost_pool = []
+        for pool in pools:
+            used_cpu = sum([pod.cpu for pod in pools[pool]])
+            free_cpu = max_cpu - used_cpu
+            if free_cpu < v.cpu:
+                continue # pod v does not fit to this pool
+            pod_deltas = []
+            for pod_size in sorted(FillMaxPods.pod_sizes, reverse=True):
+                orig_fit = free_cpu // pod_size
+                new_fit = (free_cpu - v.cpu) // pod_size
+                pod_deltas.append(orig_fit - new_fit)
+            cost_pool.append((pod_deltas, pool))
+        cost_pool.sort()
+        if len(cost_pool) > 0:
+            return add_to(pools[cost_pool[0][1]], v, dry_run)
+    FillMaxPods.pod_sizes = set() # set((400, 1800))
+
+    def FillOrderMissing(v, pools, dry_run=False):
+        pools.__class__.__repr__ = lambda x: "missing remote_py3aal -D FILLORDER"
+        pools[sorted(pools)[0]].add(v)
+
+    assign_pod = FillOrderMissing
+^ifdef FillFirstFree
+    assign_pod = FillFirstFree
+^endif
+^ifdef FillBalanced
+    assign_pod = FillBalanced
+^endif
+^ifdef FillPacked
+    assign_pod = FillPacked
+^endif
+^ifdef FillMinCPU
+    assign_pod = FillMinCPU
+^endif
+^ifdef FillMaxCPU
+    assign_pod = FillMaxCPU
+^endif
+^ifdef FillMaxPods
+    assign_pod = FillMaxPods
+^endif
+
+    # cpu_shortage returns True if all pods in a pool consume more
+    # cpu than what is available in the pool.
+    def cpu_shortage(pools):
+        for pool in pools:
+            if sum([v.cpu for v in pools[pool]]) > max_cpu:
+                return True
+        return False
+}
+
+
+variables {
+    pools, cpu_avail
+}
+
+initial_state {
+    # The default pool_count can be overridden from remote_py3aal command line:
+    # remote_py3aal -c "pool_count=4" ...
+    global pool_count
+
+    # pools[NAME] = set of pods in pool NAME
+    pools = Pools()
+    if "pool_count" not in globals():
+        pool_count = 2
+    for p in range(pool_count):
+        pools[p] = set()
+
+    # cpu_avail is constant: how much cpu is available on the node
+    cpu_avail = len(pools) * max_cpu
+}
+
+input "create pod=A cpu=400",
+      "create pod=B cpu=1000",
+      "create pod=C cpu=1800" {
+    guard {
+        v = vars(input_name)
+        # Kubernetes scheduler can schedule a pod on a node
+        # if there is enough free CPU. free = avail - used.
+        if v.cpu <= cpu_avail - cpu_used(pools):
+            return True
+        return False
+    }
+    body {
+        assign_pod(vars(input_name), pools)
+    }
+}
+
+^ifdef "delete"
+input "delete pod=A",
+      "delete pod=B", "delete pod=C" {
+    guard {
+        v = vars(input_name)
+        for pool in pools:
+            for vv in pools[pool]:
+                if vv.pod == v.pod:
+                    return True
+        return False
+    }
+    body {
+        v = vars(input_name)
+        pool_names = list(pools.keys())
+        random.shuffle(pool_names)
+        for pool in pool_names:
+            for vv in pools[pool]:
+                if vv.pod == v.pod:
+                    pools[pool].remove(vv)
+                    return
+    }
+}
+^endif
+
+tag "bad peformance" {
+    guard { return cpu_shortage(pools) }
+}
+
+tag "fail to run pod=A cpu=400",
+    "fail to run pod=B cpu=1000",
+    "fail to run pod=C cpu=1800" {
+    guard {
+        v = vars(tag_name)
+        if v.cpu <= cpu_avail - cpu_used(pools):
+            # can schedule
+            if assign_pod(v, pools, dry_run=True) != True:
+                # cannot run
+                return True
+        return False
+    }
+}
