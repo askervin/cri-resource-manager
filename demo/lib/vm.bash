@@ -821,6 +821,116 @@ vm-install-cni-weavenet() {
     fi
 }
 
+vm-install-prometheus() {
+    # 1. Install Prometheus operator
+    vm-command "kubectl apply -f https://raw.githubusercontent.com/prometheus-operator/prometheus-operator/master/bundle.yaml"
+    # 2. Create Prometheus service account.
+    local rbacapi
+    vm-command "kubectl get node -o jsonpath='{.items[].status.nodeInfo.kubeletVersion}'"
+    local kubelet_version="${COMMAND_OUTPUT#v}"
+    if [ "$( (echo 1.22; echo $kubelet_version) | sort -V | head -n 1 )" == "1.22" ]; then
+        # Running Kubernetes 1.22 or newer
+        rbacapi="v1"
+    else
+        # Running Kubernetes older than 1.22
+        rbacapi="v1beta1"
+    fi
+
+    cat <<EOF | vm-pipe-to-file prometheus/prometheus-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+---
+apiVersion: rbac.authorization.k8s.io/${rbacapi}
+kind: ClusterRole
+metadata:
+  name: prometheus
+rules:
+- apiGroups: [""]
+  resources:
+  - nodes
+  - nodes/metrics
+  - services
+  - endpoints
+  - pods
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources:
+  - configmaps
+  verbs: ["get"]
+- apiGroups:
+  - networking.k8s.io
+  resources:
+  - ingresses
+  verbs: ["get", "list", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/${rbacapi}
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus
+subjects:
+- kind: ServiceAccount
+  name: prometheus
+  namespace: default
+EOF
+    vm-command "kubectl apply -f prometheus/prometheus-rbac.yaml" ||
+        command-error "creating Prometheus account failed"
+    # 3. Tell the operator to install Prometheus
+    cat <<EOF | vm-pipe-to-file prometheus/prometheus.yaml
+apiVersion: monitoring.coreos.com/v1
+kind: Prometheus
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  image: quay.io/prometheus/prometheus:v2.22.1
+  nodeSelector:
+    kubernetes.io/os: linux
+  replicas: 1
+  resources:
+    requests:
+      memory: 400Mi
+  securityContext:
+    fsGroup: 2000
+    runAsNonRoot: true
+    runAsUser: 1000
+  serviceAccountName: prometheus
+  version: v2.22.1
+  serviceMonitorSelector: {}
+EOF
+    vm-command "kubectl apply -f prometheus/prometheus.yaml" ||
+        command-error "creating Prometheus CRD failed"
+
+    cat <<EOF | vm-pipe-to-file prometheus/prometheus-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  labels:
+    app: prometheus
+spec:
+  ports:
+  - name: web
+    port: 9090
+    targetPort: web
+  selector:
+    app: prometheus
+  sessionAffinity: ClientIP
+EOF
+    vm-command "kubectl apply -f prometheus/prometheus-service.yaml" ||
+        command-error "creating Prometheus service failed"
+    vm-command "kubectl wait --for=condition=ready pod -l app=prometheus" ||
+        command-error "waiting for Prometheus application pod failed"
+}
+
 vm-print-usage() {
     echo "- Login VM:     ssh $VM_SSH_USER@$VM_IP"
     echo "- Stop VM:      govm stop $VM_NAME"
