@@ -11,7 +11,7 @@ require (
 	github.com/google/go-cmp v0.5.7
 	github.com/hashicorp/go-multierror v1.1.1
 	github.com/intel/cri-resource-manager/pkg/topology v0.0.0
-	github.com/intel/goresctrl v0.2.1-0.20220408111310-9f1bb7c427f7
+	github.com/intel/goresctrl v0.2.1-0.20220413185813-a359bf12660f
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/client_golang v1.12.1
 	github.com/prometheus/client_model v0.2.0
