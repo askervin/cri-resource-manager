@@ -882,6 +882,9 @@ echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.d/k8s.conf
 echo "net.ipv4.conf.*.rp_filter = 0" >> /etc/sysctl.d/k8s.conf
 
 /sbin/sysctl -p /etc/sysctl.d/k8s.conf || :
+
+# enable password login
+(echo e2etest; echo e2etest) | passwd || :
 EOF
 }
 
