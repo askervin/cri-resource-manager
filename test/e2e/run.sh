@@ -802,6 +802,29 @@ $py_assertion
     return 0
 }
 
+kubectl-force-delete() { # script API
+    # Usage: kubectl-force-delete OBJECT NAME
+    #
+    # Examples:
+    # - kubectl-force-delete namespace my-namespace
+    #     Deletes a namespace that is stuck in the "Terminating" phase.
+    if [[ "$1" == "namespace" ]] || [[ "$1" == "ns" ]]; then
+        local ns="$2"
+        vm-command "
+            kubectl get namespace $ns -o json > force-delete-ns.json || exit 0
+            (
+              grep -E phase.*Terminating force-delete-ns.json || exit 0
+              sed -i '/\"kubernetes\"/d' force-delete-ns.json
+              pgrep -f 'kubectl proxy --port 8001' || ( kubectl proxy --port 8001 </dev/null >/dev/null 2>&1 & sleep 3 )
+              curl -sk -H 'Content-Type: application/json' -X PUT --data-binary @force-delete-ns.json http://127.0.0.1:8001/api/v1/namespaces/$ns/finalize
+            )
+            rm -f force-delete-ns.json
+            "
+    else
+        error "unsupported type for force-delete: $1"
+    fi
+}
+
 kubectl() { # script API
     # Usage: kubectl parameters
     #
