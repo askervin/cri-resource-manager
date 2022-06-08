@@ -78,9 +78,29 @@ type BalloonDef struct {
 	PreferNewBalloons bool
 }
 
+// DeepCopy creates a deep copy of a BalloonsOptions
+func (bo *BalloonsOptions) DeepCopy() *BalloonsOptions {
+	outBo := *bo
+	outBo.ReservedPoolNamespaces = make([]string, len(bo.ReservedPoolNamespaces))
+	copy(outBo.ReservedPoolNamespaces, bo.ReservedPoolNamespaces)
+	outBo.BalloonDefs = make([]*BalloonDef, len(bo.BalloonDefs))
+	for i, _ := range bo.BalloonDefs {
+		outBo.BalloonDefs[i] = bo.BalloonDefs[i].DeepCopy()
+	}
+	return &outBo
+}
+
 // String stringifies a BalloonDef
 func (bdef BalloonDef) String() string {
 	return bdef.Name
+}
+
+// DeepCopy creates a deep copy of a BalloonDef
+func (bdef *BalloonDef) DeepCopy() *BalloonDef {
+	outBdef := *bdef
+	outBdef.Namespaces = make([]string, len(bdef.Namespaces))
+	copy(outBdef.Namespaces, bdef.Namespaces)
+	return &outBdef
 }
 
 // defaultBalloonsOptions returns a new BalloonsOptions instance, all initialized to defaults.

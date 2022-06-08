@@ -712,10 +712,64 @@ func (p *balloons) getPodMilliCPU(podID string) int64 {
 	return cpuRequested
 }
 
+// changesBalloons returns true if two balloons policy configurations
+// may lead into different balloon instances or workload assignment.
+func changesBalloons(opts0, opts1 *BalloonsOptions) bool {
+	if len(opts0.BalloonDefs) != len(opts1.BalloonDefs) {
+		return true
+	}
+	o0 := opts0.DeepCopy()
+	o1 := opts1.DeepCopy()
+	// Ignore differences in CPU class names. Every other change
+	// potentially changes balloons or workloads.
+	o0.IdleCpuClass = ""
+	o1.IdleCpuClass = ""
+	for i, _ := range o0.BalloonDefs {
+		o0.BalloonDefs[i].CpuClass = ""
+		o1.BalloonDefs[i].CpuClass = ""
+	}
+	return utils.DumpJSON(o0) != utils.DumpJSON(o1)
+}
+
+// changesCpuClasses returns true if two balloons policy
+// configurations can lead to using different CPU classes on
+// corresponding balloon instances. Calling changesCpuClasses(o0, o1)
+// makes sense only if changesBalloons(o0, o1) has returned false.
+func changesCpuClasses(o0, o1 *BalloonsOptions) bool {
+	if o0.IdleCpuClass != o1.IdleCpuClass {
+		return true
+	}
+	if len(o0.BalloonDefs) != len(o1.BalloonDefs) {
+		return true
+	}
+	for i, _ := range(o0.BalloonDefs) {
+		if o0.BalloonDefs[i].CpuClass != o1.BalloonDefs[i].CpuClass {
+			return true
+		}
+	}
+	return false
+}
+
 // configNotify applies new configuration.
 func (p *balloons) configNotify(event pkgcfg.Event, source pkgcfg.Source) error {
 	log.Info("configuration %s", event)
-	if err := p.setConfig(balloonsOptions); err != nil {
+	defer log.Debug("effective configuration:\n%s\n", utils.DumpJSON(p.bpoptions))
+	newBalloonsOptions := balloonsOptions.DeepCopy()
+	if !changesBalloons(&p.bpoptions, newBalloonsOptions) {
+		if !changesCpuClasses(&p.bpoptions, newBalloonsOptions) {
+			log.Info("no configuration changes")
+		} else {
+			log.Info("configuration changes only on CPU classes")
+			// (Re)configures all CPUs in balloons.
+			p.resetCpuClass()
+			for _, bln := range p.balloons {
+				p.useCpuClass(bln)
+			}
+			p.bpoptions = *newBalloonsOptions
+		}
+		return nil
+	}
+	if err := p.setConfig(newBalloonsOptions); err != nil {
 		log.Error("config update failed: %v", err)
 		return err
 	}
@@ -861,9 +915,10 @@ func (p *balloons) setConfig(bpoptions *BalloonsOptions) error {
 		log.Info("- balloon %d: %s", blnIdx, bln)
 	}
 	// No errors in balloon creation, take new configuration into use.
-	log.Debug("new %s configuration:\n%s", PolicyName, utils.DumpJSON(bpoptions))
+	log.Debug("new  %s configuration:\n%s", PolicyName, utils.DumpJSON(bpoptions))
 	p.balloons = balloons
 	p.bpoptions = *bpoptions
+	log.Debug("real %s configuration:\n%s", PolicyName, utils.DumpJSON(p.bpoptions))
 	// (Re)configures all CPUs in balloons.
 	p.resetCpuClass()
 	for _, bln := range balloons {
