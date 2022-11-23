@@ -15,21 +15,20 @@
 package balloons
 
 import (
-	"bytes"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Limit is an integer where negative numbers have special meanings.
 type Limit int
 
 const (
-	Unlimited            Limit = -1
-	greatestInvalidLimit       = -2
+	LimitNoLimit Limit = 0
 )
 
 var limitToString = map[Limit]string{
-	Unlimited: "unlimited",
+	LimitNoLimit: "unlimited",
 }
 
 // String stringifies a Limit
@@ -40,28 +39,24 @@ func (lm Limit) String() string {
 	return fmt.Sprintf("%d", int(lm))
 }
 
-// MarshalJSON marshals a Limit as a quoted json string
-func (lm Limit) MarshalJSON() ([]byte, error) {
-	buffer := bytes.NewBufferString("\"" + lm.String() + "\"")
-	return buffer.Bytes(), nil
-}
-
 // UnmarshalJSON unmarshals a JSON string to Limit
 func (lm *Limit) UnmarshalJSON(b []byte) error {
 	if len(b) == 0 {
-		return balloonsError("invalid limit (empty string)")
+		return fmt.Errorf("invalid limit")
 	}
-	if b[0] >= '0' && b[0] <= '9' {
-		lmInt, err := strconv.Atoi(string(b))
-		*lm = Limit(lmInt)
-		return err
+	if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
+		return lm.UnmarshalJSON(b[1 : len(b)-1])
 	}
-	bStr := string(b[1 : len(b)-1])
+	if i, err := strconv.Atoi(string(b)); err == nil && i >= int(LimitNoLimit) {
+		*lm = Limit(i)
+		return nil
+	}
+	name := strings.ToLower(string(b))
 	for lmConst, lmString := range limitToString {
-		if lmString == bStr {
+		if lmString == name {
 			*lm = lmConst
 			return nil
 		}
 	}
-	return balloonsError("invalid limit %q", string(b))
+	return fmt.Errorf("invalid limit %q", name)
 }

@@ -35,6 +35,7 @@ const (
 	CPUTopologyLevelNuma
 	CPUTopologyLevelCore
 	CPUTopologyLevelThread
+	CPUTopologyLevelCount
 )
 
 // cpuTreeAllocator allocates CPUs from the CPU tree from the branch
@@ -414,20 +415,22 @@ func (ctl CPUTopologyLevel) String() string {
 
 // UnmarshalJSON unmarshals a JSON string to CPUTopologyLevel
 func (ctl *CPUTopologyLevel) UnmarshalJSON(b []byte) error {
-	i, err := strconv.Atoi(string(b))
-	if err == nil {
+	if len(b) == 0 {
+		return fmt.Errorf("invalid CPU topology level")
+	}
+	if len(b) > 1 && b[0] == '"' && b[len(b)-1] == '"' {
+		return ctl.UnmarshalJSON(b[1 : len(b)-1])
+	}
+	if i, err := strconv.Atoi(string(b)); err == nil && i >= int(CPUTopologyLevelUndefined) && i < int(CPUTopologyLevelCount) {
 		*ctl = CPUTopologyLevel(i)
 		return nil
 	}
 	name := strings.ToLower(string(b))
-	if len(name) > 2 && strings.HasPrefix(name, "\"") && strings.HasSuffix(name, "\"") {
-		name = name[1 : len(name)-1]
-		for ctlInt, ctlName := range cpuTopologyLevelToString {
-			if name == ctlName {
-				*ctl = ctlInt
-				return nil
-			}
+	for ctlConst, ctlString := range cpuTopologyLevelToString {
+		if ctlString == name {
+			*ctl = ctlConst
+			return nil
 		}
 	}
-	return fmt.Errorf("unknown CPU topology level %q", b)
+	return fmt.Errorf("invalid CPU topology level %q", name)
 }

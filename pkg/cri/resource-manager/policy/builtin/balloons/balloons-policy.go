@@ -129,7 +129,7 @@ func (bln Balloon) AvailMilliCpus() int {
 }
 
 func (bln Balloon) MaxAvailMilliCpus(freeCpus cpuset.CPUSet) int {
-	if bln.Def.MaxCpus == Unlimited {
+	if bln.Def.MaxCpus == LimitNoLimit {
 		return (bln.Cpus.Size() + freeCpus.Size()) * 1000
 	}
 	return int(bln.Def.MaxCpus) * 1000
@@ -525,7 +525,7 @@ func (p *balloons) newBalloon(blnDef *BalloonDef, confCpus bool) (*Balloon, erro
 	var err error
 	blnsOfDef := p.balloonsByDef(blnDef)
 	// Allowed to create new balloon instance from blnDef?
-	if int(blnDef.MaxBalloons) > 0 && int(blnDef.MaxBalloons) <= len(blnsOfDef) {
+	if blnDef.MaxBalloons > LimitNoLimit && int(blnDef.MaxBalloons) <= len(blnsOfDef) {
 		return nil, balloonsError("cannot create new %q balloon, MaxBalloons limit (%d) reached", blnDef.Name, blnDef.MaxBalloons)
 	}
 	// Find the first unused balloon instance index.
@@ -1008,9 +1008,6 @@ func (p *balloons) validateConfig(bpoptions *BalloonsOptions) error {
 	for _, blnDef := range bpoptions.BalloonDefs {
 		if blnDef.Name == reservedBalloonDefName || blnDef.Name == defaultBalloonDefName {
 			continue
-		}
-		if blnDef.MaxCpus == 0 || blnDef.MaxCpus <= greatestInvalidLimit {
-			return balloonsError("invalid MaxCPUs:%s in balloon type %q", blnDef.MaxCpus, blnDef.Name)
 		}
 	}
 	return nil
