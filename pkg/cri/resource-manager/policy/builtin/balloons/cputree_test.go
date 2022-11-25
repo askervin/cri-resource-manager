@@ -576,5 +576,31 @@ func TestWalk(t *testing.T) {
 			t.Errorf("expected to find 7 nodes, got %d", foundCount)
 		}
 	})
+}
 
+func TestCpuLocations(t *testing.T) {
+	tree, _ := newCpuTreeFromInt5([5]int{2, 2, 2, 4, 2})
+	cpus := cpuset.NewCPUSet(0, 1, 3, 4, 16)
+	systemlocations := tree.CpuLocations(cpus)
+	package1locations := tree.children[1].CpuLocations(cpus)
+	if len(package1locations) != 5 {
+		t.Errorf("expected package1locations length 5, got %d", len(package1locations))
+		return
+	}
+	if len(systemlocations) != 6 {
+		t.Errorf("expected systemlocations length 6, got %d", len(systemlocations))
+		return
+	}
+	if systemlocations[0][0] != "system" {
+		t.Errorf("expected 'system' location, got %q", systemlocations[0][0])
+		return
+	}
+	if systemlocations[1][0] != "p0" {
+		t.Errorf("expected 'system' location, got %q", systemlocations[1][0])
+		return
+	}
+	if len(systemlocations[4]) != 4 {
+		t.Errorf("expected len(systemlocations[4]) 4, got %d", len(systemlocations[4]))
+		return
+	}
 }

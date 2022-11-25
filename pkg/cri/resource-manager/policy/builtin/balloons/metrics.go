@@ -41,6 +41,12 @@ var descriptors = []*prometheus.Desc{
 			"balloon",
 			"cpus",
 			"cpus_count",
+			"numas",
+			"numas_count",
+			"dies",
+			"dies_count",
+			"packages",
+			"packages_count",
 			"sharedidlecpus",
 			"sharedidlecpus_count",
 			"cpus_allowed",
@@ -68,6 +74,12 @@ type BalloonMetrics struct {
 	PrettyName            string
 	Cpus                  cpuset.CPUSet
 	CpusCount             int
+	Numas                 []string
+	NumasCount            int
+	Dies                  []string
+	DiesCount             int
+	Packages              []string
+	PackagesCount         int
 	SharedIdleCpus        cpuset.CPUSet
 	SharedIdleCpusCount   int
 	CpusAllowed           cpuset.CPUSet
@@ -88,6 +100,7 @@ func (p *balloons) PollMetrics() policy.Metrics {
 	policyMetrics := &Metrics{}
 	policyMetrics.Balloons = make([]*BalloonMetrics, len(p.balloons))
 	for index, bln := range p.balloons {
+		cpuLoc := p.cpuTree.CpuLocations(bln.Cpus)
 		bm := &BalloonMetrics{}
 		policyMetrics.Balloons[index] = bm
 		bm.DefName = bln.Def.Name
@@ -97,6 +110,14 @@ func (p *balloons) PollMetrics() policy.Metrics {
 		bm.PrettyName = bln.PrettyName()
 		bm.Cpus = bln.Cpus
 		bm.CpusCount = bm.Cpus.Size()
+		if len(cpuLoc) > 3 {
+			bm.Numas = cpuLoc[3]
+			bm.NumasCount = len(bm.Numas)
+			bm.Dies = cpuLoc[2]
+			bm.DiesCount = len(bm.Dies)
+			bm.Packages = cpuLoc[1]
+			bm.PackagesCount = len(bm.Packages)
+		}
 		bm.SharedIdleCpus = bln.SharedIdleCpus
 		bm.SharedIdleCpusCount = bm.SharedIdleCpus.Size()
 		bm.CpusAllowed = bm.Cpus.Union(bm.SharedIdleCpus)
@@ -139,6 +160,12 @@ func (p *balloons) CollectMetrics(m policy.Metrics) ([]prometheus.Metric, error)
 			bm.PrettyName,
 			bm.Cpus.String(),
 			strconv.Itoa(bm.CpusCount),
+			strings.Join(bm.Numas, ","),
+			strconv.Itoa(bm.NumasCount),
+			strings.Join(bm.Dies, ","),
+			strconv.Itoa(bm.DiesCount),
+			strings.Join(bm.Packages, ","),
+			strconv.Itoa(bm.PackagesCount),
 			bm.SharedIdleCpus.String(),
 			strconv.Itoa(bm.SharedIdleCpusCount),
 			bm.CpusAllowed.String(),

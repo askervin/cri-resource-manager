@@ -138,6 +138,22 @@ func (t *cpuTreeNode) String() string {
 	return fmt.Sprintf("%s%v", t.name, t.children)
 }
 
+// CpuLocations returns a slice where each element contains names of
+// topology elements over which a set of CPUs spans. Example:
+// system.CpuLocations(cpuset:0-99) = [["system"],["p0", "p1"], ["p0d0", "p1d0"], ...]
+func (t *cpuTreeNode) CpuLocations(cpus cpuset.CPUSet) [][]string {
+	names := make([][]string, int(CPUTopologyLevelCount)-int(t.level))
+	t.DepthFirstWalk(func(tn *cpuTreeNode) error {
+		if tn.cpus.Intersection(cpus).Size() == 0 {
+			return WalkSkipChildren
+		}
+		levelIndex := int(tn.level) - int(t.level)
+		names[levelIndex] = append(names[levelIndex], tn.name)
+		return nil
+	})
+	return names
+}
+
 // NewAllocator returns new CPU allocator for CPUs in the CPU tree
 // branch where the CPU tree node is the topmost node.
 func (t *cpuTreeNode) NewAllocator(options cpuTreeAllocatorOptions) *cpuTreeAllocator {
