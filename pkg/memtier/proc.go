@@ -139,6 +139,10 @@ func procWriteInt(path string, i int) error {
 	return procWrite(path, []byte(strconv.Itoa(i)))
 }
 
+func procWriteUint64(path string, i uint64) error {
+	return procWrite(path, []byte(strconv.FormatUint(i, 10)))
+}
+
 func procRead(path string) (string, error) {
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
