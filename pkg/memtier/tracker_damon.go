@@ -587,9 +587,18 @@ func (t *TrackerDamon) bpftraceReader() error {
 	}
 	/* bpftrace output handler routine */
 	go func() {
-		var start, end, nrAccesses, age int64
-		var kdamondPid int
+		// from /sys/kernel/tracing/events/damon/damon_aggregated/format: ...
+		// format: ...
+		//         field:unsigned long target_id;  offset:8;       size:8; signed:0;
+		//         field:unsigned int nr_regions;  offset:16;      size:4; signed:0;
+		//         field:unsigned long start;      offset:24;      size:8; signed:0;
+		//         field:unsigned long end;        offset:32;      size:8; signed:0;
+		//         field:unsigned int nr_accesses; offset:40;      size:4; signed:0;
+		//         field:unsigned int age; offset:44;      size:4; signed:0;
 		var targetId uint64
+		var start, end uint64
+		var nrAccesses, age uint
+		var kdamondPid int
 		for true {
 			_, err := fmt.Fscanf(bpftraceOutput, "%d %d %x %x %d %d\n", &kdamondPid, &targetId, &start, &end, &nrAccesses, &age)
 			if err != nil {
@@ -728,7 +737,7 @@ func (t *TrackerDamon) legacyTargetIdToPid(targetId int64, start uint64, end uin
 	return 0
 }
 
-func (t *TrackerDamon) storeAggregated(pid int, start, end, nrAccesses, age int64) error {
+func (t *TrackerDamon) storeAggregated(pid int, start, end uint64, nrAccesses, age uint) error {
 	// TODO: avoid locking this often
 	t.mutex.Lock()
 	startLengthCount, ok := t.accesses[pid]
@@ -814,12 +823,12 @@ func (t *TrackerDamon) perfHandleLine(line string) error {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine: parse error: target_id syntax error"})
 		return fmt.Errorf("parse error (%w) on targetIdStr %q line %q", err, targetIdStr, line)
 	}
-	start, err := strconv.Atoi(startStr)
+	start, err := strconv.ParseUint(startStr, 10, 64)
 	if err != nil {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine: parse error: start address syntax error"})
 		return fmt.Errorf("parse error (%w) on startStr %q line %q", err, startStr, line)
 	}
-	end, err := strconv.Atoi(endStr)
+	end, err := strconv.ParseUint(endStr, 10, 64)
 	if err != nil {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine: parse error: end address syntax error"})
 		return fmt.Errorf("parse error (%w) on endStr %q line %q", err, endStr, line)
@@ -828,8 +837,7 @@ func (t *TrackerDamon) perfHandleLine(line string) error {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine: parse error: start addr after end addr"})
 		return fmt.Errorf("parse error: start >= end (%d >= %d) line %q", start, end, line)
 	}
-	nrAccesses := 0
-	nrAccesses, err = strconv.Atoi(nrStr)
+	nrAccesses, err := strconv.ParseUint(nrStr, 10, 32)
 	if err != nil {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine: parse error: nr_access syntax error"})
 		return fmt.Errorf("parse error (%w) on nrStr %q line %q", err, nrStr, line)
@@ -839,15 +847,15 @@ func (t *TrackerDamon) perfHandleLine(line string) error {
 		// Linux 5.17+: target_id is an index in to the pids in the target_id's file.
 		pid = t.iface.AggregatedPid(0, targetId)
 	} else {
-		pid = t.legacyTargetIdToPid(int64(targetId), uint64(start), uint64(end), false)
+		pid = t.legacyTargetIdToPid(int64(targetId), start, end, false)
 	}
 	if pid < 1 {
 		stats.Store(StatsHeartbeat{"TrackerDamon.perfHandleLine:unknown target id"})
 		return nil
 	}
-	age := 0
+	age := uint(0)
 	/* age is not parsed */
-	t.storeAggregated(pid, start, end, nrAccesses, age)
+	t.storeAggregated(pid, start, end, uint(nrAccesses), age)
 	// // TODO: avoid locking this often
 	// t.mutex.Lock()
 	// startLengthCount, ok := t.accesses[pid]
