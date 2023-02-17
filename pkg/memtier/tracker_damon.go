@@ -80,6 +80,7 @@ type DamonUserspaceInterface interface {
 	ApplyState(value string) error
 	// AggregatedPid returns the PID of the tracked workload on an aggregation line.
 	AggregatedPid(kdamondPid int, targetId uint64) int
+	KdamondPids() []int
 }
 
 type damonDebugfs struct {
@@ -151,7 +152,7 @@ func (t *TrackerDamon) SetConfigJson(configJson string) error {
 	if err := unmarshal(configJson, config); err != nil {
 		return err
 	}
-	if !strings.HasPrefix(config.Connection, "perf") || config.Connection == "bpftrace" {
+	if !strings.HasPrefix(config.Connection, "perf") && config.Connection != "bpftrace" {
 		return fmt.Errorf("invalid damon connection %q, supported: \"perf [options]\" \"bpftrace\"", config.Connection)
 	}
 	if config.SamplingUs == 0 {
@@ -306,6 +307,10 @@ func (debugfs *damonDebugfs) AggregatedPid(kdamondPid int, targetId uint64) int 
 		return debugfs.appliedPids[targetId]
 	}
 	return 0
+}
+
+func (debugfs *damonDebugfs) KdamondPids() []int {
+	return []int{}
 }
 
 func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
@@ -477,6 +482,16 @@ func (sysfs *damonSysfs) AggregatedPid(kdamondPid int, targetId uint64) int {
 	return 0
 }
 
+func (sysfs *damonSysfs) KdamondPids() []int {
+	kpids := make([]int, len(sysfs.kdamondPidTargetIdPid))
+	i := 0
+	for kdamondPid := range sysfs.kdamondPidTargetIdPid {
+		kpids[i] = kdamondPid
+		i++
+	}
+	return kpids
+}
+
 func (t *TrackerDamon) Start() error {
 	t.mutex.Lock()
 	defer t.mutex.Unlock()
@@ -575,7 +590,18 @@ func (t *TrackerDamon) GetCounters() *TrackerCounters {
 func (t *TrackerDamon) bpftraceReader() error {
 	log.Debugf("TrackerDamon: bpftrace online\n")
 	defer log.Debugf("TrackerDamon: bpftrace offline\n")
-	cmd := exec.Command("bpftrace", "-e", "tracepoint:damon:damon_aggregated{ printf(\"%d %ld %lx %lx %d %d\\n\", pid, args->target_id, args->start, args->end, args->nr_accesses, args->age); }")
+	pidFilterStr := ""
+	kpids := t.iface.KdamondPids()
+	if len(kpids) > 0 {
+		pidFilters := make([]string, len(kpids))
+		for i, kpid := range kpids {
+			pidFilters[i] = fmt.Sprintf("pid == %d", kpid)
+		}
+		pidFilterStr = "/ " + strings.Join(pidFilters, " || ") + " /"
+	}
+	bpftraceProgram := "tracepoint:damon:damon_aggregated " + pidFilterStr + " { printf(\"%d %ld %lx %lx %d %d\\n\", pid, args->target_id, args->start, args->end, args->nr_accesses, args->age); }"
+	log.Debugf("launch: bpftrace -e %v", bpftraceProgram)
+	cmd := exec.Command("bpftrace", "-e", bpftraceProgram)
 	outPipe, err := cmd.StdoutPipe()
 	if err != nil {
 		return fmt.Errorf("creating stdout pipe for bpftrace failed: %w", err)
