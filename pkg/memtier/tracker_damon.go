@@ -88,13 +88,13 @@ type damonDebugfs struct {
 }
 
 type kdamondInfo struct {
-	id             int
-	state          string
-	targetIdPid    []int
-	targetsPath    string
-	statePath      string
-	kdamondPidPath string
-	attrsPath      string
+	id          int
+	state       string
+	targetIdPid []int
+	targetsPath string
+	statePath   string
+	pidPath     string
+	attrsPath   string
 }
 
 type damonSysfs struct {
@@ -355,6 +355,7 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 			nrContextsPath := fmt.Sprintf("%s/%d/contexts/nr_contexts", trackerDamonSysfsPath, kdamondId)
 			targetsPath := fmt.Sprintf("%s/%d/contexts/0/targets", trackerDamonSysfsPath, kdamondId)
 			statePath := fmt.Sprintf("%s/%d/state", trackerDamonSysfsPath, kdamondId)
+			pidPath := fmt.Sprintf("%s/%d/pid", trackerDamonSysfsPath, kdamondId)
 			attrsPath := fmt.Sprintf("%s/%d/contexts/0/monitoring_attrs", trackerDamonSysfsPath, kdamondId)
 			if currState, err := procReadTrimmed(statePath); currState != "off" && err == nil {
 				log.Warnf("taking control over kdamond %s despite %q was %q", kdamondId, statePath, currState)
@@ -372,6 +373,7 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 				id:          kdamondId,
 				targetsPath: targetsPath,
 				statePath:   statePath,
+				pidPath:     pidPath,
 				attrsPath:   attrsPath,
 			})
 			sysfs.kdamondsList = append(sysfs.kdamondsList, kdamondId)
@@ -465,10 +467,12 @@ func (sysfs *damonSysfs) ApplyState(value string) error {
 		// workload.
 		sysfs.kdamondPidTargetIdPid = map[int][]int{}
 		for _, kdamond := range sysfs.kdamonds {
-			kdamondPid, err := procReadInt(kdamond.kdamondPidPath)
+			kdamondPid, err := procReadInt(kdamond.pidPath)
 			if err != nil {
-				return fmt.Errorf("failed to read kdamond pid from %q: %w", kdamond.kdamondPidPath, err)
+				log.Debugf("damon sysfs.ApplyState(\"on\"): cannot read from %q: %s", kdamond.pidPath, err)
+				return fmt.Errorf("failed to read kdamond pid from %q: %w", kdamond.pidPath, err)
 			}
+			log.Debugf("damon sysfs.ApplyState(\"on\"): %q: %d", kdamond.pidPath, kdamondPid)
 			sysfs.kdamondPidTargetIdPid[kdamondPid] = kdamond.targetIdPid
 		}
 	default: // other states do not affect isRunning
