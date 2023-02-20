@@ -330,10 +330,10 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 	// DAMON simultaneously:
 	//
 	// bpftrace -e 'tracepoint:damon:damon_aggregated / pid == 52100 || pid == 52101 / { printf( ... ) } '
-	nrKdamondsPath := trackerDamonSysfsPath + "/kdamonds/nr_kdamonds"
+	nrKdamondsPath := trackerDamonSysfsPath + "/nr_kdamonds"
 	globalNrKdamonds, err := procReadInt(nrKdamondsPath)
 	if err != nil {
-		return err
+		return fmt.Errorf("damon sysfs.initialize: failed to read %q: %w", nrKdamondsPath, err)
 	}
 	if globalNrKdamonds == 0 {
 		if config.NrKdamonds == 0 {
@@ -351,11 +351,11 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 			if kdamondId >= sysfs.nrKdamonds {
 				return fmt.Errorf("illegal kdamond %d in DAMON tracker configuration KdamondsList: last available kdamond in system is %d", kdamondId, sysfs.nrKdamonds-1)
 			}
-			contextsPath := fmt.Sprintf("%s/kdamonds/%d/contexts", trackerDamonSysfsPath, kdamondId)
-			nrContextsPath := fmt.Sprintf("%s/kdamonds/%d/contexts/nr_contexts", trackerDamonSysfsPath, kdamondId)
-			targetsPath := fmt.Sprintf("%s/kdamonds/%d/contexts/0/targets", trackerDamonSysfsPath, kdamondId)
-			statePath := fmt.Sprintf("%s/kdamonds/%d/state", trackerDamonSysfsPath, kdamondId)
-			attrsPath := fmt.Sprintf("%s/kdamonds/%d/contexts/0/monitoring_attrs", trackerDamonSysfsPath, kdamondId)
+			contextsPath := fmt.Sprintf("%s/%d/contexts", trackerDamonSysfsPath, kdamondId)
+			nrContextsPath := fmt.Sprintf("%s/%d/contexts/nr_contexts", trackerDamonSysfsPath, kdamondId)
+			targetsPath := fmt.Sprintf("%s/%d/contexts/0/targets", trackerDamonSysfsPath, kdamondId)
+			statePath := fmt.Sprintf("%s/%d/state", trackerDamonSysfsPath, kdamondId)
+			attrsPath := fmt.Sprintf("%s/%d/contexts/0/monitoring_attrs", trackerDamonSysfsPath, kdamondId)
 			if currState, err := procReadTrimmed(statePath); currState != "off" && err == nil {
 				log.Warnf("taking control over kdamond %s despite %q was %q", kdamondId, statePath, currState)
 				if err = procWrite(statePath, []byte("off")); err != nil {
@@ -374,6 +374,7 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 				statePath:   statePath,
 				attrsPath:   attrsPath,
 			})
+			sysfs.kdamondsList = append(sysfs.kdamondsList, kdamondId)
 		}
 	} else {
 		return fmt.Errorf("missing DAMON configuration kdamondsList")
@@ -383,15 +384,18 @@ func (sysfs *damonSysfs) initialize(config *TrackerDamonConfig) error {
 
 func (sysfs *damonSysfs) ApplyAttrs(config *TrackerDamonConfig) error {
 	if sysfs.nrKdamonds == 0 {
-		sysfs.initialize(config)
+		if err := sysfs.initialize(config); err != nil {
+			log.Debugf("damonSysfs.ApplyAttrs: initialization failed: %s", err)
+			return err
+		}
 	}
 	for _, kdamond := range sysfs.kdamonds {
 		fnameValue := map[string]uint64{
-			filepath.Join(kdamond.attrsPath, "interval", "aggr_us"):   config.AggregationUs,
-			filepath.Join(kdamond.attrsPath, "interval", "sample_us"): config.SamplingUs,
-			filepath.Join(kdamond.attrsPath, "interval", "update_us"): config.RegionsUpdateUs,
-			filepath.Join(kdamond.attrsPath, "nr_regions", "min"):     config.MinTargetRegions,
-			filepath.Join(kdamond.attrsPath, "nr_regions", "max"):     config.MaxTargetRegions,
+			filepath.Join(kdamond.attrsPath, "intervals", "aggr_us"):   config.AggregationUs,
+			filepath.Join(kdamond.attrsPath, "intervals", "sample_us"): config.SamplingUs,
+			filepath.Join(kdamond.attrsPath, "intervals", "update_us"): config.RegionsUpdateUs,
+			filepath.Join(kdamond.attrsPath, "nr_regions", "min"):      config.MinTargetRegions,
+			filepath.Join(kdamond.attrsPath, "nr_regions", "max"):      config.MaxTargetRegions,
 		}
 		for fname, value := range fnameValue {
 			if err := procWriteUint64(fname, value); err != nil {
@@ -408,8 +412,10 @@ func (sysfs *damonSysfs) ApplyTargetIds(pids []int) error {
 	   without a reset. */
 	sysfs.ApplyState("off")
 	kdamondIndexPids := make([][]int, len(sysfs.kdamondsList))
+	log.Debugf("ApplyTargetIds(%v): kdamondIndexPids=%v", pids, kdamondIndexPids)
 	kdamondIndex := 0
 	for _, pid := range pids {
+		log.Debugf("ApplyTargetIds(%v): pid=%d kdamondIndexPids=%v kdamonIndex=%d len(sysfs.kdamonds)=%d", pids, pid, kdamondIndexPids, kdamondIndex, len(sysfs.kdamonds))
 		kdamondIndexPids[kdamondIndex] = append(kdamondIndexPids[kdamondIndex], pid)
 		kdamondIndex++
 		if kdamondIndex >= len(sysfs.kdamonds) {
@@ -417,6 +423,7 @@ func (sysfs *damonSysfs) ApplyTargetIds(pids []int) error {
 		}
 	}
 	for kdamondIndex, kdamond := range sysfs.kdamonds {
+		log.Debugf("ApplyTargetIds(%v): writing targets to kdamondIndex=%d kdamond=%+v", pids, kdamondIndex, kdamond)
 		kdamond.targetIdPid = kdamondIndexPids[kdamondIndex]
 		nrTargetsPath := filepath.Join(kdamond.targetsPath, "nr_targets")
 		nrTargets := len(kdamond.targetIdPid)
@@ -543,6 +550,7 @@ func (t *TrackerDamon) Stop() {
 		t.toPerfReader <- 0
 	}
 	if t.toBpftraceReader != nil {
+		log.Debugf("TrackerDamon: Stop: send 0 to bpftraceReader()")
 		t.toBpftraceReader <- 0
 	}
 }
@@ -607,9 +615,18 @@ func (t *TrackerDamon) bpftraceReader() error {
 		return fmt.Errorf("creating stdout pipe for bpftrace failed: %w", err)
 	}
 	bpftraceOutput := bufio.NewReader(outPipe)
-	log.Debugf("TrackerDamon: launching bpftrace...\n")
+	log.Debugf("TrackerDamon: launching bpftrace...")
 	if err = cmd.Start(); err != nil {
+		log.Debugf("starting bpftrace failed: %s", err)
 		return fmt.Errorf("starting bpftrace failed: %w", err)
+	} else {
+		log.Debugf("reading the first line from bpftrace output...")
+		/* Read the "Attaching 1 probe..." line */
+		_, err := fmt.Fscanf(bpftraceOutput, "Attaching 1 probe...\n")
+		if err != nil {
+			return fmt.Errorf("reading the first line of bpftrace output failed: %s", err)
+		}
+		log.Debugf("bpftrace started successfully")
 	}
 	/* bpftrace output handler routine */
 	go func() {
@@ -628,18 +645,20 @@ func (t *TrackerDamon) bpftraceReader() error {
 		for true {
 			_, err := fmt.Fscanf(bpftraceOutput, "%d %d %x %x %d %d\n", &kdamondPid, &targetId, &start, &end, &nrAccesses, &age)
 			if err != nil {
+				log.Debugf("bpftrace unexpected output error: %s", err)
 				stats.Store(StatsHeartbeat{fmt.Sprintf("TrackerDamon.bpftraceReadStop (%s)", err)})
 				break
 			}
 			stats.Store(StatsHeartbeat{"TrackerDamon.bpftraceReadLine"})
 			pid := t.iface.AggregatedPid(kdamondPid, targetId)
 			t.storeAggregated(pid, start, end, nrAccesses, age)
-			/* TODO: add to counters, see handlePerfLine */
-
 		}
+		log.Debugf("bpftrace reader routine loop exiting")
 		if t.toBpftraceReader != nil {
+			log.Debugf("bpftrace reader routine writing 0 reader")
 			t.toBpftraceReader <- 0
 		}
+		log.Debugf("bpftrace reader routine exited")
 	}()
 	<-t.toBpftraceReader
 	close(t.toBpftraceReader)
