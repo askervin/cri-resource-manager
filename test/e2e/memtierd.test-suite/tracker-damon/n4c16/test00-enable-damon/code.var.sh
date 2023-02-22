@@ -31,9 +31,10 @@ policy:
         samplingus: 1000
         aggregationus: 200000
         regionsupdateus: 3000000
-        mintargetregions: 100
-        maxtargetregions: 5000
+        mintargetregions: 128
+        maxtargetregions: 8192
         interface: 0
+        sysfsregionsmanager: 1
         kdamondslist: [3, 4, 5]
         nrkdamonds: 8
     mover:
@@ -41,3 +42,4 @@ policy:
       bandwidth: 1000
 "
 memtierd-start
+memtierd-stop
