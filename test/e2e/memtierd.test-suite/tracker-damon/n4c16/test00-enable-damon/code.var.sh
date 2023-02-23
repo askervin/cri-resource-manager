@@ -35,6 +35,7 @@ policy:
         maxtargetregions: 8192
         interface: 0
         sysfsregionsmanager: 1
+        filteraddressrangesizemax: 8192000
         kdamondslist: [3, 4, 5]
         nrkdamonds: 8
     mover:
