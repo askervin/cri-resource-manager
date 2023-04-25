@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: redis${REDIS_ID}
+  name: redis${REDIS_ID}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis${REDIS_ID}
+  template:
+    metadata:
+      labels:
+        app: redis${REDIS_ID}
+    spec:
+      containers:
+        - name: redis${REDIS_ID}
+          image: redis
+          imagePullPolicy: IfNotPresent
+          args: ['--requirepass', '$REDIS_PASS']
+          ports:
+            - containerPort: 6379
+              name: redis${REDIS_ID}
+          env:
+            - name: MASTER
+              value: 'true'
+            - name: REDIS_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: redis
+                  key: REDIS_PASS
+          resources:
+            requests:
+              cpu: ${CPU}
+              memory: '${MEM}'
+            limits:
+              cpu: ${CPULIM}
+              memory: '${MEMLIM}'
