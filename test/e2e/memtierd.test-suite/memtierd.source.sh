@@ -27,6 +27,9 @@ memtierd-os-env() {
 }
 
 memtierd-start() {
+    if [[ -n "$MEME_CGROUP" ]]; then
+        vm-command "echo 0-3 > /sys/fs/cgroup/$MEME_CGROUP/cpuset.mems"
+    fi
     if [ -z "${MEMTIERD_YAML}" ]; then
         MEMTIERD_OPTS="-prompt -debug"
     else
@@ -57,9 +60,15 @@ memtierd-meme-start() {
     fi
     if [[ -n "$MEME_CGROUP" ]]; then
         vm-command "mkdir /sys/fs/cgroup/$MEME_CGROUP; echo $MEME_PID > /sys/fs/cgroup/$MEME_CGROUP/cgroup.procs"
+        if [[ -n "$MEME_MEMS" ]]; then
+            vm-command "echo ${MEME_MEMS} > /sys/fs/cgroup/$MEME_CGROUP/cpuset.mems"
+        fi
     fi
 }
 
 memtierd-meme-stop() {
     vm-command "killall -KILL meme"
+    if [[ -n "$MEME_CGROUP" ]]; then
+        vm-command "sudo rmdir /sys/fs/cgroup/$MEME_CGROUP"
+    fi
 }
