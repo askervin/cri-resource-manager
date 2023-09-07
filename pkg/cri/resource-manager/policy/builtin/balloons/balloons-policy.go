@@ -92,7 +92,8 @@ type Balloon struct {
 	// - len(PodIDs) is the number of pods in the balloon.
 	// - len(PodIDs[podID]) is the number of containers of podID
 	//   currently assigned to the balloon.
-	PodIDs map[string][]string
+	PodIDs           map[string][]string
+	cpuTreeAllocator *cpuTreeAllocator
 }
 
 var log logger.Logger = logger.NewLogger("policy")
@@ -544,6 +545,24 @@ func (p *balloons) newBalloon(blnDef *BalloonDef, confCpus bool) (*Balloon, erro
 			break
 		}
 	}
+	// Configure new cpuTreeAllocator for this balloon if there
+	// are type specific allocator options, otherwise use policy
+	// default allocator.
+	cpuTreeAllocator := p.cpuTreeAllocator
+	if blnDef.AllocatorTopologyBalancing != nil || blnDef.PreferManyCores != nil {
+		allocatorOptions := cpuTreeAllocatorOptions{
+			topologyBalancing: p.bpoptions.AllocatorTopologyBalancing,
+			preferManyCores:   p.bpoptions.PreferManyCores,
+		}
+		if blnDef.AllocatorTopologyBalancing != nil {
+			allocatorOptions.topologyBalancing = *blnDef.AllocatorTopologyBalancing
+		}
+		if blnDef.PreferManyCores != nil {
+			allocatorOptions.preferManyCores = *blnDef.PreferManyCores
+		}
+		cpuTreeAllocator = p.cpuTree.NewAllocator(allocatorOptions)
+	}
+
 	// Allocate CPUs
 	if blnDef == p.reservedBalloonDef ||
 		(blnDef == p.defaultBalloonDef && blnDef.MinCpus == 0 && blnDef.MaxCpus == 0) {
@@ -551,7 +570,8 @@ func (p *balloons) newBalloon(blnDef *BalloonDef, confCpus bool) (*Balloon, erro
 		// So does the default balloon unless its CPU counts are tweaked.
 		cpus = p.reserved
 	} else {
-		addFromCpus, _, err := p.cpuTreeAllocator.ResizeCpus(cpuset.New(), p.freeCpus, blnDef.MinCpus)
+		addFromCpus, _, err := cpuTreeAllocator.ResizeCpus(cpuset.New(), p.freeCpus, blnDef.MinCpus)
+		log.Debugf("DELME - cpuTreeAllocator says addFromCpus=%v", addFromCpus)
 		if err != nil {
 			return nil, balloonsError("failed to choose a cpuset for allocating first %d CPUs from %#s", blnDef.MinCpus, p.freeCpus)
 		}
@@ -562,12 +582,13 @@ func (p *balloons) newBalloon(blnDef *BalloonDef, confCpus bool) (*Balloon, erro
 		p.freeCpus = p.freeCpus.Difference(cpus)
 	}
 	bln := &Balloon{
-		Def:            blnDef,
-		Instance:       freeInstance,
-		PodIDs:         make(map[string][]string),
-		Cpus:           cpus,
-		SharedIdleCpus: cpuset.New(),
-		Mems:           p.closestMems(cpus),
+		Def:              blnDef,
+		Instance:         freeInstance,
+		PodIDs:           make(map[string][]string),
+		Cpus:             cpus,
+		SharedIdleCpus:   cpuset.New(),
+		Mems:             p.closestMems(cpus),
+		cpuTreeAllocator: cpuTreeAllocator,
 	}
 	if confCpus {
 		if err = p.useCpuClass(bln); err != nil {
@@ -1047,6 +1068,7 @@ func (p *balloons) setConfig(bpoptions *BalloonsOptions) error {
 	p.freeCpus = p.freeCpus.Difference(p.reserved)
 	p.cpuTreeAllocator = p.cpuTree.NewAllocator(cpuTreeAllocatorOptions{
 		topologyBalancing: bpoptions.AllocatorTopologyBalancing,
+		preferManyCores:   bpoptions.PreferManyCores,
 	})
 	// Instantiate built-in reserved and default balloons.
 	reservedBalloon, err := p.newBalloon(p.reservedBalloonDef, false)
@@ -1153,7 +1175,7 @@ func (p *balloons) resizeBalloon(bln *Balloon, newMilliCpus int) error {
 	defer p.useCpuClass(bln)
 	if cpuCountDelta > 0 {
 		// Inflate the balloon.
-		addFromCpus, _, err := p.cpuTreeAllocator.ResizeCpus(bln.Cpus, p.freeCpus, cpuCountDelta)
+		addFromCpus, _, err := bln.cpuTreeAllocator.ResizeCpus(bln.Cpus, p.freeCpus, cpuCountDelta)
 		if err != nil {
 			return balloonsError("resize/inflate: failed to choose a cpuset for allocating additional %d CPUs: %w", cpuCountDelta, err)
 		}
@@ -1167,7 +1189,7 @@ func (p *balloons) resizeBalloon(bln *Balloon, newMilliCpus int) error {
 		p.updatePinning(p.shareIdleCpus(p.freeCpus, newCpus)...)
 	} else {
 		// Deflate the balloon.
-		_, removeFromCpus, err := p.cpuTreeAllocator.ResizeCpus(bln.Cpus, p.freeCpus, cpuCountDelta)
+		_, removeFromCpus, err := bln.cpuTreeAllocator.ResizeCpus(bln.Cpus, p.freeCpus, cpuCountDelta)
 		if err != nil {
 			return balloonsError("resize/deflate: failed to choose a cpuset for releasing %d CPUs: %w", -cpuCountDelta, err)
 		}

@@ -20,8 +20,10 @@ verify-metrics-has-no-line 'balloon_type="flex"'
 
 # pod0 in full-core[0]
 CPUREQ="100m" MEMREQ="100M" CPULIM="100m" MEMLIM="100M"
-POD_ANNOTATION="balloon.balloons.cri-resource-manager.intel.com: full-core" CONTCOUNT=2 create balloons-busybox
+### POD_ANNOTATION="balloon.balloons.cri-resource-manager.intel.com: full-core" CONTCOUNT=2 create balloons-busybox
+CPUREQ=6 CPULIM=6 POD_ANNOTATION="balloon.balloons.cri-resource-manager.intel.com: threadpercore" CONTCOUNT=1 create balloons-busybox
 report allowed
+echo "FORCE FAIL"; exit 1
 verify-metrics-has-line 'balloon="default\[0\]"'
 verify-metrics-has-line 'balloon="reserved\[0\]"'
 verify-metrics-has-line 'balloons{balloon="full-core\[0\]",balloon_type="full-core",containers="pod0:pod0c0,pod0:pod0c1",cpu_class="normal",cpus=".*",cpus_allowed=".*",cpus_allowed_count="2",cpus_count="2",cpus_max="2",cpus_min="2",dies="p[01]d0",dies_count="1",mems="0",numas="p[01]d0n[0-3]",numas_count="1",packages="p[01]",packages_count="1",sharedidlecpus="",sharedidlecpus_count="0",tot_req_millicpu="(199|200)"} 2'
@@ -77,6 +79,8 @@ POD_ANNOTATION="balloon.balloons.cri-resource-manager.intel.com: fast-dualcore" 
 report allowed
 verify-metrics-has-line 'balloon="fast-dualcore\[1\]".*pod2c0.* 4'
 verify-metrics-has-line 'balloon="fast-dualcore\[0\]".*pod5c0.* 4'
+
+
 
 # # Re-launch cri-resmgr with test suite default parameters
 # terminate cri-resmgr

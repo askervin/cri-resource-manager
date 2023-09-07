@@ -41,8 +41,19 @@ type balloonsOptionsWrapped struct {
 	// allocated and resized so that all topology elements
 	// (packages, dies, numa nodes, cores) have roughly same
 	// amount of allocations. The default is false: balloons are
-	// packed tightly to optimize power efficiency.
+	// packed tightly to optimize power efficiency. The value set
+	// here can be overridden with the balloon type specific
+	// setting with the same name.
 	AllocatorTopologyBalancing bool
+	// PreferManyCores prefers allocating logical CPUs for a
+	// balloon from different CPU cores. This prevents workloads
+	// in the balloon interfere with themselves, but allows more
+	// interference between workloads in different balloons. The
+	// default is false: balloons are packed tightly to minimum
+	// number of full CPU cores. The value set here can be
+	// overridden with the balloon type specific setting with the
+	// same name.
+	PreferManyCores bool `json:"PreferManyCores,omitempty"`
 	// BallonDefs contains balloon type definitions.
 	BalloonDefs []*BalloonDef `json:"BalloonTypes,omitempty"`
 }
@@ -69,6 +80,12 @@ type BalloonDef struct {
 	// resizing a balloon. At init, balloons with highest priority
 	// CPUs are allocated first.
 	AllocatorPriority cpuallocator.CPUPriority `json:"AllocatorPriority"`
+	// PreferManyCores is the balloon type specific parameter of
+	// the policy level parameter with the same name.
+	PreferManyCores *bool `json:"PreferManyCores,omitempty"`
+	// AllocatorTopologyBalancing is the balloon type specific
+	// parameter of the policy level parameter with the same name.
+	AllocatorTopologyBalancing *bool `json:"AllocatorTopologyBalancing,omitempty"`
 	// CpuClass controls how CPUs of a balloon are (re)configured
 	// whenever a balloon is created, inflated or deflated.
 	CpuClass string `json:"CpuClass"`
