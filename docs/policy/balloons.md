@@ -144,6 +144,8 @@ Balloons policy parameters:
       the balloon.
   - `PreferManyCores` overrides the policy level option with the same
     name in the scope of this balloon type.
+  - `PreferManyPackages` overrides the policy level option with the same
+    name in the scope of this balloon type.
   - `AllocatorPriority` (0: High, 1: Normal, 2: Low, 3: None). CPU
     allocator parameter, used when creating new or resizing existing
     balloons. If there are balloon types with pre-created balloons

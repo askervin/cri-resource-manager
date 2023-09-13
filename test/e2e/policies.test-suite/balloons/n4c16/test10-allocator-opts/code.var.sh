@@ -43,4 +43,11 @@ verify 'len(cores["pod3c0"]) == 1' \
        'len(cpus["pod3c0"]) == 2' \
        'cpus["pod3c0"] == cpus["pod3c1"]'
 
+# pod4: spread to all packages
+CPUREQ="2" MEMREQ="100M" CPULIM="2" MEMLIM="100M"
+POD_ANNOTATION="balloon.balloons.cri-resource-manager.intel.com: topo0cores0pkgs1" CONTCOUNT=1 create balloons-busybox
+report allowed
+verify 'len(packages["pod4c0"]) == 2' \
+       'len(cpus["pod4c0"]) == 2'
+
 cleanup

@@ -54,6 +54,13 @@ type balloonsOptionsWrapped struct {
 	// overridden with the balloon type specific setting with the
 	// same name.
 	PreferManyCores bool `json:"PreferManyCores,omitempty"`
+	// PreferManyPackages prefers allocating logical CPUs from
+	// separate CPU packages. For instance, if you have a 4-socket
+	// system and create a balloon with 4 CPUs, then the balloon
+	// will consist of one logical CPU from each CPU package. The
+	// default is false: allocate logical CPUs topologically close
+	// to each other.
+	PreferManyPackages bool `json:"PreferManyPackages,omitempty"`
 	// BallonDefs contains balloon type definitions.
 	BalloonDefs []*BalloonDef `json:"BalloonTypes,omitempty"`
 }
@@ -83,6 +90,9 @@ type BalloonDef struct {
 	// PreferManyCores is the balloon type specific parameter of
 	// the policy level parameter with the same name.
 	PreferManyCores *bool `json:"PreferManyCores,omitempty"`
+	// PreferManyPackages is the balloon type specific parameter of
+	// the policy level parameter with the same name.
+	PreferManyPackages *bool `json:"PreferManyPackages,omitempty"`
 	// AllocatorTopologyBalancing is the balloon type specific
 	// parameter of the policy level parameter with the same name.
 	AllocatorTopologyBalancing *bool `json:"AllocatorTopologyBalancing,omitempty"`

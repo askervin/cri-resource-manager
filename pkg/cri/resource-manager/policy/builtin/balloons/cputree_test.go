@@ -233,6 +233,7 @@ func TestResizeCpus(t *testing.T) {
 		topology               [5]int // package, die, numa, core, thread count
 		allocatorTB            bool   // allocator topologyBalancing
 		allocatorPMC           bool   // allocator preferManyCores
+		allocatorPMP           bool   // allocator preferManyPackages
 		allocations            []int
 		deltas                 []int
 		allocate               bool
@@ -471,13 +472,34 @@ func TestResizeCpus(t *testing.T) {
 				{"package", []int{1, 2}}, {"package", []int{1, 2, 3}}, {"package", []int{1, 2, 3, 4}},
 			},
 		},
+		{
+			name:         "prefer many packages",
+			topology:     [5]int{4, 1, 4, 8, 2},
+			allocatorPMP: true,
+			deltas: []int{
+				4, -4, 2, 2,
+				4, -4,
+			},
+			allocate: true,
+			operateOnCcid: []int{
+				1, 1, 1, 1,
+				1, 1,
+			},
+			expectCurrentOnSame: []string{},
+			expectCurrentNotOnSame: []string{
+				"package", "", "package", "package",
+				"", "package",
+			},
+			expectDisjoint: []TopoCcids{},
+		},
 	}
 	for _, tc := range tcases {
 		t.Run(tc.name, func(t *testing.T) {
 			tree, csit := newCpuTreeFromInt5(tc.topology)
 			treeA := tree.NewAllocator(cpuTreeAllocatorOptions{
-				topologyBalancing: tc.allocatorTB,
-				preferManyCores:   tc.allocatorPMC,
+				topologyBalancing:  tc.allocatorTB,
+				preferManyCores:    tc.allocatorPMC,
+				preferManyPackages: tc.allocatorPMP,
 			})
 			currentCpus := cpuset.New()
 			freeCpus := tree.Cpus()

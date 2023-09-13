@@ -549,16 +549,20 @@ func (p *balloons) newBalloon(blnDef *BalloonDef, confCpus bool) (*Balloon, erro
 	// are type specific allocator options, otherwise use policy
 	// default allocator.
 	cpuTreeAllocator := p.cpuTreeAllocator
-	if blnDef.AllocatorTopologyBalancing != nil || blnDef.PreferManyCores != nil {
+	if blnDef.AllocatorTopologyBalancing != nil || blnDef.PreferManyCores != nil || blnDef.PreferManyPackages != nil {
 		allocatorOptions := cpuTreeAllocatorOptions{
-			topologyBalancing: p.bpoptions.AllocatorTopologyBalancing,
-			preferManyCores:   p.bpoptions.PreferManyCores,
+			topologyBalancing:  p.bpoptions.AllocatorTopologyBalancing,
+			preferManyCores:    p.bpoptions.PreferManyCores,
+			preferManyPackages: p.bpoptions.PreferManyPackages,
 		}
 		if blnDef.AllocatorTopologyBalancing != nil {
 			allocatorOptions.topologyBalancing = *blnDef.AllocatorTopologyBalancing
 		}
 		if blnDef.PreferManyCores != nil {
 			allocatorOptions.preferManyCores = *blnDef.PreferManyCores
+		}
+		if blnDef.PreferManyPackages != nil {
+			allocatorOptions.preferManyPackages = *blnDef.PreferManyPackages
 		}
 		cpuTreeAllocator = p.cpuTree.NewAllocator(allocatorOptions)
 	}
@@ -1067,8 +1071,9 @@ func (p *balloons) setConfig(bpoptions *BalloonsOptions) error {
 	p.freeCpus = p.allowed.Clone()
 	p.freeCpus = p.freeCpus.Difference(p.reserved)
 	p.cpuTreeAllocator = p.cpuTree.NewAllocator(cpuTreeAllocatorOptions{
-		topologyBalancing: bpoptions.AllocatorTopologyBalancing,
-		preferManyCores:   bpoptions.PreferManyCores,
+		topologyBalancing:  bpoptions.AllocatorTopologyBalancing,
+		preferManyCores:    bpoptions.PreferManyCores,
+		preferManyPackages: bpoptions.PreferManyPackages,
 	})
 	// Instantiate built-in reserved and default balloons.
 	reservedBalloon, err := p.newBalloon(p.reservedBalloonDef, false)

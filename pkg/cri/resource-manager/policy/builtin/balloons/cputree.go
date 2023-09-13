@@ -79,8 +79,9 @@ type cpuTreeAllocatorOptions struct {
 	// topologyBalancing true prefers allocating from branches
 	// with most free CPUs (spread allocations), while false is
 	// the opposite (packed allocations).
-	topologyBalancing bool
-	preferManyCores   bool
+	topologyBalancing  bool
+	preferManyCores    bool
+	preferManyPackages bool
 }
 
 // Strings returns topology level as a string
@@ -178,6 +179,55 @@ func (t *cpuTreeNode) CopyNode() *cpuTreeNode {
 		cpus:     t.cpus,
 	}
 	return &newNode
+}
+
+// ExtendLeaves creates a copy of each leaf node and makes it the child
+// of the original leaf node.
+func (t *cpuTreeNode) ExtendLeaves() {
+	if len(t.children) != 0 {
+		for _, child := range t.children {
+			child.ExtendLeaves()
+		}
+		return
+	}
+	newNode := cpuTreeNode{
+		name:   fmt.Sprintf("e(%s)", t.name),
+		level:  t.level,
+		parent: t,
+		cpus:   t.cpus.Clone(),
+	}
+	t.AddChild(&newNode)
+}
+
+// Merge merges one or more trees into this tree.
+func (t *cpuTreeNode) Merge(others ...*cpuTreeNode) {
+	names := []string{t.name}
+	for _, other := range others {
+		if len(t.children) != len(other.children) {
+			panic(fmt.Sprintf("Merge: children count mismatch on\n%s\n%s",
+				t.PrettyPrint(), other.PrettyPrint()))
+		}
+		names = append(names, other.name)
+	}
+	if len(t.children) == 0 && t.parent != nil {
+		for _, other := range others {
+			t.parent.AddChild(other)
+		}
+		return
+	}
+	t.name = fmt.Sprintf("m(%s)", strings.Join(names, ","))
+	for childIndex := range t.children {
+		otherChildren := make([]*cpuTreeNode, 0, len(others))
+		for _, other := range others {
+			otherChild := other.children[childIndex]
+			otherChildren = append(otherChildren, otherChild)
+		}
+		t.children[childIndex].Merge(otherChildren...)
+		for _, otherChild := range otherChildren {
+			otherChild.parent = t
+			t.cpus = t.cpus.Union(otherChild.cpus)
+		}
+	}
 }
 
 // Depth returns the distance from the root node.
@@ -469,6 +519,38 @@ func (t *cpuTreeNode) NewAllocator(options cpuTreeAllocatorOptions) *cpuTreeAllo
 			})
 		ta.root = newTree
 	}
+	if options.preferManyPackages {
+		// Modify the topology tree by
+		// 1. making each leaf node a leaf branch:
+		//    packageX
+		//        ...
+		//        +-- coreX
+		//            +-- coreX.thread0
+		//            +-- coreX.thread1
+		//        becomes
+		//        +-- coreX
+		//            +-- coreX.thread0
+		//                +-- coreX.thread0
+		//            +-- coreX.thread1
+		//                +-- coreX.thread1
+		// 2. merging all package branches into the first one:
+		//    package0
+		//        ...
+		//        +-- coreX
+		//            +-- coreX.thread0
+		//                +-- package0.coreX.thread0
+		//                +-- package1.coreX.thread0
+		//            +-- coreX.thread1
+		//                +-- package0.coreX.thread1
+		//                +-- package1.coreX.thread1
+		// 3. removing all other packages but the first one.
+		newTree := ta.root.CopyTree()
+		newTree.ExtendLeaves()
+		packages := newTree.children
+		packages[0].Merge(packages[1:]...)
+		newTree.children = []*cpuTreeNode{packages[0]}
+		ta.root = newTree
+	}
 	return ta
 }
 
@@ -560,15 +642,15 @@ func (ta *cpuTreeAllocator) sorterRelease(tnas []cpuTreeNodeAttributes) func(int
 func (ta *cpuTreeAllocator) ResizeCpus(currentCpus, freeCpus cpuset.CPUSet, delta int) (cpuset.CPUSet, cpuset.CPUSet, error) {
 	if delta > 0 {
 		addFromSuperset, removeFromSuperset, err := ta.resizeCpus(currentCpus, freeCpus, delta)
-		if !ta.options.preferManyCores || addFromSuperset.Size() == delta {
+		if (!ta.options.preferManyCores && !ta.options.preferManyPackages) || addFromSuperset.Size() == delta {
 			return addFromSuperset, removeFromSuperset, err
 		}
 		// addFromSuperset contains more CPUs (equally good
 		// choices) than actually needed. In case of
-		// preferManyCores, however, selecting any of these
-		// does not result in equally good result. Therefore,
-		// in this case, construct addFrom set by adding one
-		// CPU at a time.
+		// preferManyCores or Packages, however, selecting any
+		// of these does not result in equally good
+		// result. Therefore, in this case, construct addFrom
+		// set by adding one CPU at a time.
 		addFrom := cpuset.New()
 		for n := 0; n < delta; n++ {
 			addSingleFrom, _, err := ta.resizeCpus(currentCpus, freeCpus, 1)
